@@ -157,6 +157,10 @@ describe('SystemSettings component', () => {
 		expect(compPanel.text()).toContain('绝对阈值');
 		expect(compPanel.text()).toContain('压缩模型');
 
+		// Contains the network proxy section with its mode dropdown
+		expect(runtimeBody.text()).toContain('网络代理');
+		expect(runtimeBody.find('select.net-select').exists()).toBe(true);
+
 		// Click to collapse
 		await runtimeHead.trigger('click');
 		await wrapper.vm.$nextTick();

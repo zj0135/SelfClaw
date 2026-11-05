@@ -6,6 +6,7 @@ import CodeSection from './appearance/CodeSection.vue';
 import ThemeModeSelector from './appearance/ThemeModeSelector.vue';
 import TypographySection from './appearance/TypographySection.vue';
 import Compression from './compression/Compression.vue';
+import Network from './network/Network.vue';
 import WorkspaceTools from './tools/WorkspaceTools.vue';
 import { useAppearance } from '../../composables/useAppearance.js';
 
@@ -73,6 +74,7 @@ function toggleGroup(id) {
 
 					<div v-else-if="group.id === 'runtime'" class="runtime-composite">
 						<WorkspaceTools />
+						<Network />
 
 						<div class="subgroup-divider">
 							<Shrink :size="13" :stroke-width="2" class="subgroup-ico" aria-hidden="true" />

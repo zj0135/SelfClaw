@@ -52,7 +52,7 @@ public sealed class OpenAiProviderAdapterTests
             + "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\","
             + "\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n"
             + "data: [DONE]\n\n";
-        using var http = new AiProviderHttpClientProvider(() => new SseHandler(sse));
+        using var http = new AiProviderHttpClientProvider(_ => new SseHandler(sse));
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
         var request = CreateRequest(
             AiProviderKind.OpenAICompatible,
@@ -89,7 +89,7 @@ public sealed class OpenAiProviderAdapterTests
             + "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"created\":1,\"model\":\"test-model\","
             + "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"two\"},\"finish_reason\":null}]}\n\n"
             + "data: [DONE]\n\n";
-        using var http = new AiProviderHttpClientProvider(() => new SseHandler(sse));
+        using var http = new AiProviderHttpClientProvider(_ => new SseHandler(sse));
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
         var request = CreateRequest(
             AiProviderKind.OpenAICompatible,

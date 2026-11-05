@@ -2,7 +2,10 @@ using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.AiProviders.Models;
+using SelfClaw.Infrastructure.Network;
 
 namespace SelfClaw.Infrastructure.AiProviders.Http;
 
@@ -12,17 +15,27 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
 
     private readonly ConcurrentDictionary<string, Lazy<HttpClient>> _clients = new();
     private readonly ConcurrentDictionary<string, Lazy<HttpMessageHandler>> _sharedHandlers = new();
-    private readonly Func<HttpMessageHandler> _primaryHandlerFactory;
+    private readonly Func<NetworkProxySettings, HttpMessageHandler> _primaryHandlerFactory;
+    private readonly INetworkProxySource _proxySource;
     private bool _disposed;
 
     public AiProviderHttpClientProvider()
-        : this(CreateSocketsHttpHandler)
+        : this(DefaultNetworkProxySource.Instance)
     {
     }
 
-    internal AiProviderHttpClientProvider(Func<HttpMessageHandler> primaryHandlerFactory)
+    public AiProviderHttpClientProvider(INetworkProxySource proxySource)
+        : this(NetworkProxyHttpHandler.Create, proxySource)
     {
+    }
+
+    internal AiProviderHttpClientProvider(
+        Func<NetworkProxySettings, HttpMessageHandler> primaryHandlerFactory,
+        INetworkProxySource? proxySource = null)
+    {
+        ArgumentNullException.ThrowIfNull(primaryHandlerFactory);
         _primaryHandlerFactory = primaryHandlerFactory;
+        _proxySource = proxySource ?? DefaultNetworkProxySource.Instance;
     }
 
     public HttpClient GetNonStreamingClient(AiProviderConnection connection)
@@ -88,7 +101,7 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
 
     private HttpMessageHandler CreateHandler(ClientConfiguration configuration)
     {
-        HttpMessageHandler handler = _primaryHandlerFactory();
+        HttpMessageHandler handler = _primaryHandlerFactory(configuration.Proxy);
         if (configuration.ExtraHeaders.Count > 0)
         {
             handler = new ExtraHeadersHandler(configuration.ExtraHeaders) { InnerHandler = handler };
@@ -97,13 +110,30 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
         return handler;
     }
 
-    private static ClientConfiguration ReadConfiguration(AiProviderConnection connection)
+    private ClientConfiguration ReadConfiguration(AiProviderConnection connection)
     {
         var timeout = TimeSpan.FromSeconds(ReadTimeoutSeconds(connection.ConnectionOptions));
         var headers = ReadExtraHeaders(connection.ConnectionOptions);
-        var fingerprint = ComputeFingerprint(connection.Endpoint, timeout, headers);
-        return new ClientConfiguration(timeout, headers, fingerprint);
+        // The exit is read once and carried in the configuration, so the cached handler is built from
+        // exactly the settings its fingerprint was computed from.
+        var proxy = _proxySource.Current;
+        var fingerprint = ComputeFingerprint(connection.Endpoint, timeout, headers, DescribeProxy(proxy));
+        return new ClientConfiguration(timeout, headers, fingerprint, proxy);
     }
+
+    /// <summary>
+    /// The exit belongs in the fingerprint: without it, a mode change would keep reusing the handler built
+    /// for the previous exit and the setting would look like it did nothing. Handlers are never purged on a
+    /// change - an in-flight request must not have its socket pool disposed underneath it - so each distinct
+    /// exit keeps one idle pool until the provider is disposed.
+    /// </summary>
+    private static string DescribeProxy(NetworkProxySettings settings)
+        => settings.Mode switch
+        {
+            NetworkProxyMode.Direct => "direct",
+            NetworkProxyMode.Custom => $"custom:{settings.Host.Trim()}:{settings.Port}",
+            _ => "system"
+        };
 
     private static int ReadTimeoutSeconds(IReadOnlyDictionary<string, JsonElement> options)
     {
@@ -162,7 +192,8 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
     private static string ComputeFingerprint(
         Uri endpoint,
         TimeSpan timeout,
-        IReadOnlyDictionary<string, string> headers)
+        IReadOnlyDictionary<string, string> headers,
+        string proxy)
     {
         var builder = new StringBuilder();
         builder.Append(endpoint.GetLeftPart(UriPartial.Authority).ToLowerInvariant());
@@ -173,11 +204,9 @@ internal sealed class AiProviderHttpClientProvider : IDisposable
             builder.Append('|').Append(header.Key.ToUpperInvariant()).Append(':').Append(header.Value);
         }
 
+        builder.Append('|').Append(proxy);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
     }
-
-    private static SocketsHttpHandler CreateSocketsHttpHandler()
-        => new() { PooledConnectionLifetime = TimeSpan.FromMinutes(5) };
 
     public void Dispose()
     {

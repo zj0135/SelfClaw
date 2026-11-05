@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
+using SelfClaw.Infrastructure.Network;
 
 namespace SelfClaw.Desktop.Services.ProgrammingAssistant;
 
@@ -10,11 +12,20 @@ internal sealed class CliProbeProcess
 {
     internal const int MaximumOutputCharacters = 262144;
 
+    private readonly INetworkProxySource _proxySource;
+
+    public CliProbeProcess(INetworkProxySource? proxySource = null)
+    {
+        _proxySource = proxySource ?? DefaultNetworkProxySource.Instance;
+    }
+
     public async Task<CliProbeOutput> RunAsync(CommandInvocation invocation, TimeSpan timeout, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(invocation);
         cancellationToken.ThrowIfCancellationRequested();
         using var process = CreateProcess(invocation);
+        // The probe is SelfClaw testing a CLI, so it leaves through the same exit a real turn would use.
+        NetworkProxyEnvironment.Apply(_proxySource.Current, process.StartInfo);
         if (!process.Start()) throw new InvalidOperationException("The CLI probe could not start.");
         using var drainCancellation = new CancellationTokenSource();
         var stdout = DrainAsync(process.StandardOutput, drainCancellation.Token);

@@ -709,6 +709,11 @@ public sealed class WebViewMessageRouterTests
                     HostChannel,
                     Dispatcher.CurrentDispatcher,
                     Microsoft.Extensions.Logging.Abstractions.NullLogger<WorkspaceToolsSettingsBridge>.Instance),
+                new SelfClaw.Desktop.Services.Network.NetworkProxySettingsBridge(
+                    new SelfClaw.Desktop.Services.Network.NetworkProxySettingsService(settingsStore),
+                    HostChannel,
+                    Dispatcher.CurrentDispatcher,
+                    Microsoft.Extensions.Logging.Abstractions.NullLogger<SelfClaw.Desktop.Services.Network.NetworkProxySettingsBridge>.Instance),
                 new PetSettingsBridge(petHost, new SelfClaw.Desktop.Services.WebView.WebViewHostChannel(), System.Windows.Threading.Dispatcher.CurrentDispatcher, Microsoft.Extensions.Logging.Abstractions.NullLogger<PetSettingsBridge>.Instance),
                 new WorkspaceSelectionBridge(
                     viewModel,

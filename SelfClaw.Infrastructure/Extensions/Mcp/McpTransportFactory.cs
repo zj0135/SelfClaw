@@ -1,8 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using ModelContextProtocol.Client;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Extensions.Mcp.Models;
+using SelfClaw.Infrastructure.Network;
 
 namespace SelfClaw.Infrastructure.Extensions.Mcp;
 
@@ -18,10 +20,12 @@ internal sealed class McpTransportFactory
     internal static readonly TimeSpan StdioShutdownTimeout = TimeSpan.FromSeconds(1);
 
     private readonly ILoggerFactory _loggerFactory;
+    private readonly INetworkProxySource _proxySource;
 
-    public McpTransportFactory(ILoggerFactory? loggerFactory = null)
+    public McpTransportFactory(ILoggerFactory? loggerFactory = null, INetworkProxySource? proxySource = null)
     {
         _loggerFactory = loggerFactory ?? NullLoggerFactory.Instance;
+        _proxySource = proxySource ?? DefaultNetworkProxySource.Instance;
     }
 
     public IClientTransport Create(
@@ -38,11 +42,9 @@ internal sealed class McpTransportFactory
         return configuration.Transport switch
         {
             McpTransportKind.Stdio => new StdioClientTransport(
-                CreateStdioOptions(configuration, diagnostics),
+                ApplyProxyEnvironment(CreateStdioOptions(configuration, diagnostics)),
                 _loggerFactory),
-            McpTransportKind.Http => new HttpClientTransport(
-                CreateHttpOptions(configuration),
-                _loggerFactory),
+            McpTransportKind.Http => CreateHttpTransport(configuration),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(configuration),
                 configuration.Transport,
@@ -89,4 +91,49 @@ internal sealed class McpTransportFactory
             ConnectionTimeout = configuration.ConnectionTimeout ?? TimeSpan.FromSeconds(30)
         };
 
+    /// <summary>
+    /// The SDK builds its own client when it is not handed one, and that client would ignore the network
+    /// exit. The transport owns the client (and therefore the handler) so tearing a connection down
+    /// releases the pool with it.
+    /// </summary>
+    private IClientTransport CreateHttpTransport(ResolvedMcpServerConfiguration configuration)
+        => new HttpClientTransport(
+            CreateHttpOptions(configuration),
+            new HttpClient(NetworkProxyHttpHandler.Create(_proxySource.Current), disposeHandler: true),
+            _loggerFactory,
+            ownsHttpClient: true);
+
+    /// <summary>
+    /// A stdio server fetches its own dependencies (an npx-based server downloads its package on first
+    /// run), so it needs the network exit too. The SDK applies these entries on top of the inherited
+    /// environment, which is why only the proxy variables are written here.
+    /// </summary>
+    internal StdioClientTransportOptions ApplyProxyEnvironment(StdioClientTransportOptions options)
+    {
+        var entries = NetworkProxyEnvironment.Entries(_proxySource.Current);
+        if (entries.Count == 0)
+        {
+            return options;
+        }
+
+        var environment = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in options.EnvironmentVariables ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase))
+        {
+            environment[entry.Key] = entry.Value;
+        }
+
+        foreach (var entry in entries)
+        {
+            environment[entry.Key] = entry.Value;
+        }
+
+        if (_proxySource.Current.Mode == NetworkProxyMode.Custom && !entries.ContainsKey("NO_PROXY"))
+        {
+            environment.Remove("NO_PROXY");
+            environment.Remove("no_proxy");
+        }
+
+        options.EnvironmentVariables = environment;
+        return options;
+    }
 }

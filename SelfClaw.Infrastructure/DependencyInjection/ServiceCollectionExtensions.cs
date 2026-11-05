@@ -31,6 +31,7 @@ using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Plugins;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Infrastructure.Git;
+using SelfClaw.Infrastructure.Network;
 using SelfClaw.Infrastructure.Security;
 using SelfClaw.Infrastructure.Tools.Workspace;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
@@ -192,6 +193,8 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetService<ISubagentTaskCoordinator>(),
             serviceProvider.GetService<ISubagentDefinitionCatalog>()));
         services.AddSingleton<IDirectTurnCapabilityResolver, DirectTurnCapabilityResolver>();
+        // A host that owns the settings file replaces this registration with its settings-backed source.
+        services.AddSingleton<INetworkProxySource>(DefaultNetworkProxySource.Instance);
         services.AddSingleton<AiProviderHttpClientProvider>();
         services.AddSingleton<OpenAiModelListClient>();
         services.AddSingleton<AnthropicModelListClient>();

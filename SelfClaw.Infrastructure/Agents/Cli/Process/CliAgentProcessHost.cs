@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Abstractions;
 using SelfClaw.Infrastructure.Agents.Cli.Process.Models;
+using SelfClaw.Infrastructure.Network;
 
 namespace SelfClaw.Infrastructure.Agents.Cli.Process;
 
@@ -14,6 +16,13 @@ public sealed class CliAgentProcessHost : ICliAgentProcessHost
 {
     // UTF-8 without a BOM: the BOM would corrupt the first stdin JSONL line the child reads.
     private static readonly Encoding Utf8NoBom = new UTF8Encoding(encoderShouldEmitUTF8Identifier: false);
+
+    private readonly INetworkProxySource _proxySource;
+
+    public CliAgentProcessHost(INetworkProxySource? proxySource = null)
+    {
+        _proxySource = proxySource ?? DefaultNetworkProxySource.Instance;
+    }
 
     public ICliAgentProcessSession Start(
         CliProcessStartInfo startInfo,
@@ -53,6 +62,10 @@ public sealed class CliAgentProcessHost : ICliAgentProcessHost
             foreach (var arg in invocation.ArgumentList)
                 psi.ArgumentList.Add(arg);
         }
+
+        // The CLI authenticates from its own configuration, but it still has to reach its endpoint through
+        // the network exit the user picked; these variables are the only thing SelfClaw adds to the child.
+        NetworkProxyEnvironment.Apply(_proxySource.Current, psi);
 
         var process = new System.Diagnostics.Process
         {

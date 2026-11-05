@@ -190,7 +190,7 @@ public sealed class AiChatClientFactoryTests
             repository,
             new AiProviderRegistry([adapter]),
             protector,
-            new AiProviderHttpClientProvider(() => new StubHandler()),
+            new AiProviderHttpClientProvider(_ => new StubHandler()),
             NullLoggerFactory.Instance);
 
     private static TestData CreateData()

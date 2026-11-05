@@ -1,3 +1,4 @@
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using System.Net;
 using System.Net.Http.Headers;
@@ -14,7 +15,7 @@ public sealed class AiProviderHttpClientProviderTests
     [Fact]
     public void Non_streaming_clients_are_cached_by_canonical_connection_fingerprint()
     {
-        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        using var provider = new AiProviderHttpClientProvider(_ => new RecordingHandler());
         var connection = CreateConnection(
             new Uri("https://api.example.test/v1/"),
             "{\"timeout_seconds\":30,\"extra_headers\":{\"X-Title\":\"SelfClaw\",\"HTTP-Referer\":\"https://selfclaw.local\"}}");
@@ -66,7 +67,7 @@ public sealed class AiProviderHttpClientProviderTests
     [Fact]
     public async Task OpenAi_chat_and_responses_turn_clients_share_the_infinite_timeout_transport()
     {
-        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        using var provider = new AiProviderHttpClientProvider(_ => new RecordingHandler());
         var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{\"timeout_seconds\":12}");
         var adapter = new OpenAiProviderAdapter(
             AiProviderKind.OpenAI,
@@ -91,7 +92,7 @@ public sealed class AiProviderHttpClientProviderTests
     public async Task Extra_headers_are_injected_without_overwriting_explicit_request_headers()
     {
         var capturedRequests = new List<CapturedRequest>();
-        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler(capturedRequests));
+        using var provider = new AiProviderHttpClientProvider(_ => new RecordingHandler(capturedRequests));
         var connection = CreateConnection(
             new Uri("https://openrouter.ai/api/v1/"),
             "{\"extra_headers\":{\"HTTP-Referer\":\"https://selfclaw.local\",\"X-Title\":\"SelfClaw\",\"Authorization\":\"Bearer must-not-win\"}}");
@@ -111,7 +112,7 @@ public sealed class AiProviderHttpClientProviderTests
     [Fact]
     public void Non_streaming_timeout_defaults_to_one_hundred_seconds()
     {
-        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        using var provider = new AiProviderHttpClientProvider(_ => new RecordingHandler());
         var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
 
         provider.GetNonStreamingTimeout(connection).Should()
@@ -123,7 +124,7 @@ public sealed class AiProviderHttpClientProviderTests
     [Fact]
     public async Task Shared_streaming_handler_is_reused_and_survives_a_turn_client_disposal()
     {
-        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        using var provider = new AiProviderHttpClientProvider(_ => new RecordingHandler());
         var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
 
         var handler = provider.GetSharedStreamingHandler(connection);
@@ -163,12 +164,58 @@ public sealed class AiProviderHttpClientProviderTests
     [InlineData("{\"extra_headers\":{\"X-Title\":42}}", "*X-Title*")]
     public void Invalid_connection_options_fail_with_readable_errors(string optionsJson, string messagePattern)
     {
-        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        using var provider = new AiProviderHttpClientProvider(_ => new RecordingHandler());
         var connection = CreateConnection(new Uri("https://api.example.test/v1/"), optionsJson);
 
         var act = () => provider.GetNonStreamingClient(connection);
 
         act.Should().Throw<InvalidOperationException>().WithMessage(messagePattern);
+    }
+
+    [Fact]
+    public void Direct_mode_builds_a_handler_that_ignores_the_proxy()
+    {
+        using var provider = new AiProviderHttpClientProvider(
+            new StubNetworkProxySource(new NetworkProxySettings(NetworkProxyMode.Direct)));
+        var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
+
+        var handler = provider.GetSharedStreamingHandler(connection).Should().BeOfType<SocketsHttpHandler>().Subject;
+
+        handler.UseProxy.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Custom_mode_routes_the_handler_through_the_configured_endpoint()
+    {
+        using var provider = new AiProviderHttpClientProvider(
+            new StubNetworkProxySource(new NetworkProxySettings(NetworkProxyMode.Custom, "127.0.0.1", 7890)));
+        var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
+
+        var handler = provider.GetSharedStreamingHandler(connection).Should().BeOfType<SocketsHttpHandler>().Subject;
+
+        handler.Proxy.Should().BeOfType<WebProxy>()
+            .Which.Address.Should().Be(new Uri("http://127.0.0.1:7890"));
+    }
+
+    [Fact]
+    public void Switching_the_network_exit_rebuilds_the_cached_handler()
+    {
+        // Without the exit in the fingerprint a mode change would keep reusing the old handler and the
+        // setting would look like it did nothing.
+        var source = new MutableNetworkProxySource();
+        using var provider = new AiProviderHttpClientProvider(source);
+        var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
+
+        var system = provider.GetSharedStreamingHandler(connection);
+        provider.GetSharedStreamingHandler(connection).Should().BeSameAs(system);
+
+        source.Settings = new NetworkProxySettings(NetworkProxyMode.Direct);
+        var direct = provider.GetSharedStreamingHandler(connection);
+
+        direct.Should().NotBeSameAs(system);
+        provider.CachedSharedHandlerCount.Should().Be(2);
+        direct.Should().BeOfType<SocketsHttpHandler>().Which.UseProxy.Should().BeFalse();
+        system.Should().BeOfType<SocketsHttpHandler>().Which.UseProxy.Should().BeTrue();
     }
 
     private static AiProviderConnection CreateConnection(Uri endpoint, string optionsJson)
@@ -234,8 +281,9 @@ public sealed class AiProviderHttpClientProviderTests
 
         public int CreatedCount => Handlers.Count;
 
-        public TrackingHandler Create()
+        public TrackingHandler Create(NetworkProxySettings settings)
         {
+            // The exit is irrelevant here: these tests only observe handler identity and lifetime.
             var handler = new TrackingHandler();
             Handlers.Add(handler);
             return handler;
@@ -256,6 +304,24 @@ public sealed class AiProviderHttpClientProviderTests
             DisposeCount++;
             base.Dispose(disposing);
         }
+    }
+
+    private sealed class StubNetworkProxySource(NetworkProxySettings settings) : INetworkProxySource
+    {
+        public NetworkProxySettings Current => settings;
+
+        public Task<NetworkProxySettings> GetAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(settings);
+    }
+
+    private sealed class MutableNetworkProxySource : INetworkProxySource
+    {
+        public NetworkProxySettings Settings { get; set; } = new();
+
+        public NetworkProxySettings Current => Settings;
+
+        public Task<NetworkProxySettings> GetAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(Settings);
     }
 
     private sealed record CapturedRequest(

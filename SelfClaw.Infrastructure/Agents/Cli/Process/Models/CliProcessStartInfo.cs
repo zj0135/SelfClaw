@@ -3,7 +3,8 @@ namespace SelfClaw.Infrastructure.Agents.Cli.Process.Models;
 /// <summary>
 /// Everything <see cref="CliAgentProcessHost"/> needs to launch a single CLI agent turn: the resolved
 /// command, the directory the agent runs in and the no-activity watchdog window. The CLI authenticates
-/// from its own local configuration, so SelfClaw injects no provider environment into the child.
+/// from its own local configuration, so SelfClaw injects no provider environment into the child; the only
+/// variables added are the network exit ones (see <c>NetworkProxyEnvironment</c>).
 /// </summary>
 public sealed record CliProcessStartInfo
 {

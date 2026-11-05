@@ -30,6 +30,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 10. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
 11. **自动化历史**：转录永久保留、回收只靠手动删除；删除单条 run / 清空历史只删终态 run 并级联其会话（在跑先停止）；删除任务先取消 → 限时等待（`AutomationDefaults.DeleteWait`）→ 级联，超时返回 `DeleteTimeout` 且绝不半删。体积显示是 SQL `LENGTH()` 只读粗算，不得为此改 schema（仍 v32）。
 12. **输入框 chip 与 token**：技能 `[/id]` 是宿主契约（`SkillTokenParser` 独占 `[/…]` 形态，Direct 剥离并注入、CLI 原样透传）；文件引用 `@path`（含空白或特殊字符时 `@"..."`）与指令 `/name` 是纯文本约定，宿主不解析、不剥离。不要为文件 / 指令引入第二套宿主 token 解析；转录 `file_mention` 规则与 `renderers/composerText.js` 的裸路径字符类必须保持一致。
+13. **网络出口**：所有 .NET 出站必须经 `AiProviderHttpClientProvider`（handler 由 `NetworkProxyHttpHandler` 构造），新增出站路径要么走它，要么用 `NetworkProxyEnvironment` 给自建子进程注入出口；`SocketsHttpHandler` 默认跟随系统代理，所以「本地网络」必须显式 `UseProxy = false`。WebView2 不接入代理（理由见 `docs/network-proxy-design.md` §5），Skill 脚本 / 终端 / Git 命令刻意不注入。
 
 ## 代码约定
 
@@ -76,5 +77,6 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 右侧功能面板（聊天视图 SideDock：终端 / 子代理看板的承载、开合与宿主终端状态映射、新增工具 tab 的方式）：`docs/side-dock-design.md`。
 - 右侧面板「审查」工具（工作区 Git diff：`git-diff/*` 协议与「非仓库不是错误」的回包规则、workspace 子树作用域、未跟踪文件合成、限额与空态）：`docs/git-review-pane-design.md`。
 - 关于页应用用量仪表盘：`docs/app-usage-dashboard-design.md`（数据契约、热力图/趋势/环形口径、SQL 分桶边界）。
+- 网络出口 / 代理（本地 / 系统 / 自定义三档语义、覆盖与刻意不覆盖的请求、生效时机、为什么 WebView2 不接入）：`docs/network-proxy-design.md`。
 - 子系统：`docs/direct-subagent-system-design.md`、`docs/direct-extensions-system-design.md`、`docs/pet-system-design.md`、`docs/automation-system-design.md`、`docs/direct-context-compaction-design.md`（配套实施记录 `docs/direct-context-compaction-implementation-tasks.md`）、`docs/direct-in-turn-compaction-design.md`。
 - 规则：spec/issue 写 `.scratch/<feature-slug>/`（git 忽略）；耐久结论写 `docs/`；被取代的设计要么更新要么删除，不留"历史保留"。

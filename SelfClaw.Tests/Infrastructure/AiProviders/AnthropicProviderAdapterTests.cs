@@ -119,7 +119,7 @@ public sealed class AnthropicProviderAdapterTests
     [Fact]
     public async Task CreateAnthropicClient_uses_the_caller_owned_turn_client()
     {
-        using var provider = new AiProviderHttpClientProvider(() => new RecordingHandler());
+        using var provider = new AiProviderHttpClientProvider(_ => new RecordingHandler());
         var adapter = new AnthropicProviderAdapter(httpClientProvider: provider);
         var request = CreateRequest();
 

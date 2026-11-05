@@ -22,7 +22,7 @@ public sealed class AiModelConfigurationRequestTests
     public async Task Provider_serialization_preserves_the_bounded_tool_contract_without_display_duplication(AiProviderApiFormat format)
     {
         var handler = new RecordingHandler(ResponseFor(format));
-        using var http = new AiProviderHttpClientProvider(() => handler);
+        using var http = new AiProviderHttpClientProvider(_ => handler);
         IAiProviderAdapter adapter = format switch
         {
             AiProviderApiFormat.AnthropicMessages => new AnthropicProviderAdapter(httpClientProvider: http),
@@ -104,7 +104,7 @@ public sealed class AiModelConfigurationRequestTests
 
             """;
         var handler = new RecordingHandler(stream, "text/event-stream");
-        using var http = new AiProviderHttpClientProvider(() => handler);
+        using var http = new AiProviderHttpClientProvider(_ => handler);
         var adapter = new AnthropicProviderAdapter(httpClientProvider: http);
         var request = CreateRequest(adapter.ProviderKind, AiProviderApiFormat.AnthropicMessages, "high");
         using var httpClient = http.CreateTurnClient(request.Connection);
@@ -134,7 +134,7 @@ public sealed class AiModelConfigurationRequestTests
     public async Task Compatible_endpoint_uses_configured_effort_and_provider_default_omits_legacy_thinking(string? effort)
     {
         var handler = new RecordingHandler(ResponseFor(AiProviderApiFormat.OpenAIChatCompletions));
-        using var http = new AiProviderHttpClientProvider(() => handler);
+        using var http = new AiProviderHttpClientProvider(_ => handler);
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
         var request = CreateRequest(adapter.ProviderKind, AiProviderApiFormat.OpenAIChatCompletions, effort);
         using var httpClient = http.CreateTurnClient(request.Connection);
@@ -167,7 +167,7 @@ public sealed class AiModelConfigurationRequestTests
     public async Task Provider_requests_serialize_shared_configuration(AiProviderApiFormat format, string? effort)
     {
         var handler = new RecordingHandler(ResponseFor(format));
-        using var http = new AiProviderHttpClientProvider(() => handler);
+        using var http = new AiProviderHttpClientProvider(_ => handler);
         IAiProviderAdapter adapter = format switch
         {
             AiProviderApiFormat.AnthropicMessages => new AnthropicProviderAdapter(httpClientProvider: http),

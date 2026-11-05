@@ -24,6 +24,7 @@ using SelfClaw.Desktop.Services.Attachments.Abstractions;
 using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
+using SelfClaw.Desktop.Services.Network;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
 using SelfClaw.Desktop.Services.Questions;
@@ -154,6 +155,11 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<DirectCompressionSettingsService>());
         services.AddSingleton<WorkspaceToolsSettingsService>();
         services.AddSingleton<WorkspaceToolsSettingsBridge>();
+        services.AddSingleton<NetworkProxySettingsService>();
+        services.AddSingleton<NetworkProxySettingsBridge>();
+        // 同上：覆盖 Infrastructure 注册的默认出口（跟随 Windows 系统代理）。
+        services.AddSingleton<INetworkProxySource>(services =>
+            services.GetRequiredService<NetworkProxySettingsService>());
         // 同上：覆盖 Infrastructure 注册的默认 shell 偏好源（Windows PowerShell）。
         services.AddSingleton<IWorkspaceShellPreferenceSource>(services =>
             services.GetRequiredService<WorkspaceToolsSettingsService>());
@@ -208,6 +214,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<AppearanceSettingsBridge>(),
             services.GetRequiredService<DirectCompressionSettingsBridge>(),
             services.GetRequiredService<WorkspaceToolsSettingsBridge>(),
+            services.GetRequiredService<NetworkProxySettingsBridge>(),
             services.GetRequiredService<PetSettingsBridge>(),
             services.GetRequiredService<WorkspaceSelectionBridge>(),
             services.GetRequiredService<TerminalHostController>(),

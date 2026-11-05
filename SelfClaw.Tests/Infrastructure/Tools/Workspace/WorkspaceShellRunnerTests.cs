@@ -192,11 +192,31 @@ public sealed class WorkspaceShellRunnerTests : IDisposable
     public void FindOnPath_returns_null_when_no_directory_has_the_file()
         => ShellExecutableLocator.FindOnPath("definitely-missing.exe", _root).Should().BeNull();
 
+    [Fact]
+    public async Task The_child_shell_receives_the_selected_network_exit()
+    {
+        var runner = new WorkspaceShellRunner(
+            new StubShellPreferenceSource(WorkspaceShellKind.CommandPrompt),
+            new StubNetworkProxySource(new NetworkProxySettings(NetworkProxyMode.Custom, "127.0.0.1", 7890)));
+
+        var result = await runner.RunShellCommandAsync(_root, "echo %HTTPS_PROXY%", 15);
+
+        result.StandardOutput.Trim().Should().Be("http://127.0.0.1:7890");
+    }
+
     public void Dispose() => Directory.Delete(_root, recursive: true);
 
     private sealed class StubShellPreferenceSource(WorkspaceShellKind kind) : IWorkspaceShellPreferenceSource
     {
         public Task<WorkspaceShellPreference> GetPreferenceAsync(CancellationToken cancellationToken = default)
             => Task.FromResult(new WorkspaceShellPreference(kind));
+    }
+
+    private sealed class StubNetworkProxySource(NetworkProxySettings settings) : INetworkProxySource
+    {
+        public NetworkProxySettings Current => settings;
+
+        public Task<NetworkProxySettings> GetAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(settings);
     }
 }

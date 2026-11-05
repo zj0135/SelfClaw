@@ -77,7 +77,7 @@ public sealed class AiModelConfigurationTests : IDisposable
     {
         var repository = CreateRepository();
         var existing = await CreateProfileAsync(repository, "local-only");
-        using var http = new AiProviderHttpClientProvider(() => new ModelListHandler());
+        using var http = new AiProviderHttpClientProvider(_ => new ModelListHandler());
         var service = new AiProviderSettingsService(repository,
             new AiProviderRegistry([new OpenAiProviderAdapter(httpClientProvider: http)]), new TestSecretProtector(), repository, http);
         var configuration = CreateConfiguration("remote-model");

@@ -1,4 +1,6 @@
 using FluentAssertions;
+using ModelContextProtocol.Client;
+using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Extensions.Mcp;
 using SelfClaw.Infrastructure.Extensions.Mcp.Models;
@@ -39,6 +41,58 @@ public sealed class McpTransportFactoryTests
         options.StandardErrorLines.Should().NotBeNull();
     }
 
+    [Fact]
+    public void CreateStdioOptions_merges_the_network_exit_into_the_configured_environment()
+    {
+        var configuration = CreateConfiguration() with
+        {
+            Command = "npx",
+            Environment = new Dictionary<string, string> { ["TOKEN"] = "secret" }
+        };
+        var factory = new McpTransportFactory(
+            proxySource: new StubNetworkProxySource(new NetworkProxySettings(NetworkProxyMode.Custom, "127.0.0.1", 7890)));
+
+        var options = factory.ApplyProxyEnvironment(
+            McpTransportFactory.CreateStdioOptions(configuration, new BoundedDiagnosticBuffer()));
+
+        options.EnvironmentVariables.Should().ContainKey("TOKEN").WhoseValue.Should().Be("secret");
+        options.EnvironmentVariables.Should().ContainKey("HTTPS_PROXY").WhoseValue.Should().Be("http://127.0.0.1:7890");
+        options.EnvironmentVariables.Should().NotContainKey("NO_PROXY");
+    }
+
+    [Fact]
+    public void CreateStdioOptions_neutralizes_an_inherited_proxy_in_direct_mode()
+    {
+        var factory = new McpTransportFactory(
+            proxySource: new StubNetworkProxySource(new NetworkProxySettings(NetworkProxyMode.Direct)));
+
+        var options = factory.ApplyProxyEnvironment(
+            McpTransportFactory.CreateStdioOptions(CreateConfiguration(), new BoundedDiagnosticBuffer()));
+
+        options.EnvironmentVariables.Should().ContainKey("HTTP_PROXY").WhoseValue.Should().BeEmpty();
+        options.EnvironmentVariables.Should().ContainKey("NO_PROXY").WhoseValue.Should().Be("*");
+    }
+
+    [Fact]
+    public void Http_transport_is_built_with_the_shared_exit_aware_client()
+    {
+        // The SDK would build its own client, which would bypass the setting; this asserts the overload
+        // that takes one (plus its ownership flag) is the one in use.
+        var factory = new McpTransportFactory(
+            proxySource: new StubNetworkProxySource(new NetworkProxySettings(NetworkProxyMode.Custom, "127.0.0.1", 7890)));
+        var configuration = CreateConfiguration() with
+        {
+            Transport = McpTransportKind.Http,
+            Endpoint = new Uri("https://mcp.example.test/mcp"),
+            Command = null,
+            Arguments = []
+        };
+
+        var transport = factory.Create(configuration, new BoundedDiagnosticBuffer());
+
+        transport.Should().BeOfType<HttpClientTransport>();
+    }
+
     private static ResolvedMcpServerConfiguration CreateConfiguration()
         => new(
             "server",
@@ -57,4 +111,12 @@ public sealed class McpTransportFactoryTests
             null,
             new Dictionary<string, string>(),
             "C:\\work");
+
+    private sealed class StubNetworkProxySource(NetworkProxySettings settings) : INetworkProxySource
+    {
+        public NetworkProxySettings Current => settings;
+
+        public Task<NetworkProxySettings> GetAsync(CancellationToken cancellationToken = default)
+            => Task.FromResult(settings);
+    }
 }

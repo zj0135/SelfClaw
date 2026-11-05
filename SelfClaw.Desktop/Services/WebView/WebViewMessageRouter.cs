@@ -17,6 +17,7 @@ using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.ConversationInputs;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
+using SelfClaw.Desktop.Services.Network;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Terminal;
@@ -38,6 +39,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly AppearanceSettingsBridge _appearanceSettingsBridge;
     private readonly DirectCompressionSettingsBridge _directCompressionSettingsBridge;
     private readonly WorkspaceToolsSettingsBridge _workspaceToolsSettingsBridge;
+    private readonly NetworkProxySettingsBridge _networkProxySettingsBridge;
     private readonly PetSettingsBridge _petSettingsBridge;
     private readonly WorkspaceSelectionBridge _workspaceSelectionBridge;
     private readonly GitWorkspaceBridge? _gitWorkspaceBridge;
@@ -68,6 +70,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         AppearanceSettingsBridge appearanceSettingsBridge,
         DirectCompressionSettingsBridge directCompressionSettingsBridge,
         WorkspaceToolsSettingsBridge workspaceToolsSettingsBridge,
+        NetworkProxySettingsBridge networkProxySettingsBridge,
         PetSettingsBridge petSettingsBridge,
         WorkspaceSelectionBridge workspaceSelectionBridge,
         TerminalHostController terminalHostController,
@@ -92,6 +95,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _appearanceSettingsBridge = appearanceSettingsBridge;
         _directCompressionSettingsBridge = directCompressionSettingsBridge;
         _workspaceToolsSettingsBridge = workspaceToolsSettingsBridge;
+        _networkProxySettingsBridge = networkProxySettingsBridge;
         _petSettingsBridge = petSettingsBridge;
         _workspaceSelectionBridge = workspaceSelectionBridge;
         _gitWorkspaceBridge = gitWorkspaceBridge;
@@ -276,6 +280,13 @@ internal sealed class WebViewMessageRouter : IDisposable
             if (workspaceTools is null) throw new ArgumentException("Unsupported workspace tools message.");
             _hostChannel.PostResponse(workspaceTools.Value.Response);
             return workspaceTools.Value.Command;
+        }
+        if (type.StartsWith("network-proxy/", StringComparison.Ordinal))
+        {
+            var networkProxy = await _networkProxySettingsBridge.TryHandleAsync(type, payload, cancellationToken);
+            if (networkProxy is null) throw new ArgumentException("Unsupported network proxy message.");
+            _hostChannel.PostResponse(networkProxy.Value.Response);
+            return networkProxy.Value.Command;
         }
         if (type.StartsWith("terminal-", StringComparison.Ordinal))
         {

@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
+using SelfClaw.Infrastructure.Network;
 using SelfClaw.Infrastructure.Processes;
 
 namespace SelfClaw.Infrastructure.Tools.Workspace;
@@ -16,10 +17,14 @@ internal sealed class WorkspaceShellRunner
         "Install Git for Windows or pick another shell in Settings.";
 
     private readonly IWorkspaceShellPreferenceSource? _preferenceSource;
+    private readonly INetworkProxySource _proxySource;
 
-    public WorkspaceShellRunner(IWorkspaceShellPreferenceSource? preferenceSource = null)
+    public WorkspaceShellRunner(
+        IWorkspaceShellPreferenceSource? preferenceSource = null,
+        INetworkProxySource? proxySource = null)
     {
         _preferenceSource = preferenceSource;
+        _proxySource = proxySource ?? DefaultNetworkProxySource.Instance;
     }
 
     /// <summary>
@@ -51,8 +56,12 @@ internal sealed class WorkspaceShellRunner
         var preference = _preferenceSource is null
             ? new WorkspaceShellPreference()
             : await _preferenceSource.GetPreferenceAsync(cancellationToken).ConfigureAwait(false);
+        var startInfo = CreateProcessStartInfo(root, command, preference.ShellKind);
+        // A command the model runs may install packages or call an API, so it leaves through the same exit
+        // as SelfClaw's own requests instead of whatever the parent process happened to inherit.
+        NetworkProxyEnvironment.Apply(_proxySource.Current, startInfo);
         var result = await ProcessRunner.RunAsync(
-                CreateProcessStartInfo(root, command, preference.ShellKind),
+                startInfo,
                 timeoutSeconds,
                 $"{WorkspaceShellText.Name(preference.ShellKind)} command",
                 cancellationToken)

@@ -45,7 +45,7 @@ public sealed class ProtocolBaselineProbeTests
     [Fact]
     public async Task OpenAi_chat_completions_fragmented_tool_arguments_probe()
     {
-        using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildChatCompletionsSse()));
+        using var http = new AiProviderHttpClientProvider(_ => new SseHandler(BuildChatCompletionsSse()));
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAICompatible, httpClientProvider: http);
         var request = CreateOpenAiRequest(AiProviderApiFormat.OpenAIChatCompletions);
         using var httpClient = http.CreateTurnClient(request.Connection);
@@ -83,7 +83,7 @@ public sealed class ProtocolBaselineProbeTests
     [Fact]
     public async Task Anthropic_messages_thinking_signature_and_tool_arguments_probe()
     {
-        using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildAnthropicSse()));
+        using var http = new AiProviderHttpClientProvider(_ => new SseHandler(BuildAnthropicSse()));
         var adapter = new AnthropicProviderAdapter(httpClientProvider: http);
         var request = CreateAnthropicRequest();
         using var httpClient = http.CreateTurnClient(request.Connection);
@@ -117,7 +117,7 @@ public sealed class ProtocolBaselineProbeTests
     [Fact]
     public async Task OpenAi_responses_fragmented_tool_arguments_probe()
     {
-        using var http = new AiProviderHttpClientProvider(() => new SseHandler(BuildResponsesSse()));
+        using var http = new AiProviderHttpClientProvider(_ => new SseHandler(BuildResponsesSse()));
         var adapter = new OpenAiProviderAdapter(AiProviderKind.OpenAI, httpClientProvider: http);
         var request = CreateOpenAiRequest(AiProviderApiFormat.OpenAIResponses);
         using var httpClient = http.CreateTurnClient(request.Connection);
@@ -156,7 +156,7 @@ public sealed class ProtocolBaselineProbeTests
             AiProviderApiFormat.OpenAIResponses => BuildResponsesSse(),
             _ => BuildChatCompletionsSse()
         });
-        using var http = new AiProviderHttpClientProvider(() => handler);
+        using var http = new AiProviderHttpClientProvider(_ => handler);
         IAiProviderAdapter adapter = format == AiProviderApiFormat.AnthropicMessages
             ? new AnthropicProviderAdapter(httpClientProvider: http)
             : new OpenAiProviderAdapter(httpClientProvider: http);
@@ -191,7 +191,7 @@ public sealed class ProtocolBaselineProbeTests
             _ => BuildChatCompletionsSse()
         };
         var handler = new CapturingHandler(first, FinalSse(format));
-        using var http = new AiProviderHttpClientProvider(() => handler);
+        using var http = new AiProviderHttpClientProvider(_ => handler);
         IAiProviderAdapter adapter = format == AiProviderApiFormat.AnthropicMessages
             ? new AnthropicProviderAdapter(httpClientProvider: http)
             : new OpenAiProviderAdapter(httpClientProvider: http);
@@ -260,7 +260,7 @@ public sealed class ProtocolBaselineProbeTests
         AiProviderApiFormat format, bool isMultimodal)
     {
         var handler = new CapturingHandler(FirstSse(format), FinalSse(format));
-        using var http = new AiProviderHttpClientProvider(() => handler);
+        using var http = new AiProviderHttpClientProvider(_ => handler);
         IAiProviderAdapter adapter = format == AiProviderApiFormat.AnthropicMessages
             ? new AnthropicProviderAdapter(httpClientProvider: http)
             : new OpenAiProviderAdapter(httpClientProvider: http);
