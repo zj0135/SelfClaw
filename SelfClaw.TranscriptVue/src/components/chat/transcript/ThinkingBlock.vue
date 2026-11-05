@@ -10,7 +10,7 @@ const props = defineProps({
 	segment: { type: Object, required: true },
 	item: { type: Object, required: true },
 	isLast: { type: Boolean, default: false },
-	open: { type: Boolean, default: false },
+	open: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['toggle', 'preview-image']);
@@ -21,7 +21,7 @@ const isPending = () => Boolean(props.segment.isPending);
 const isLive = () => isPending() && props.item.isThinking;
 const hasContent = () => Boolean(props.segment.markdown);
 const shouldRender = () => hasContent() || isLive();
-const label = () => (isLive() ? '思考中...' : '思考完毕');
+const label = () => (isLive() ? '思考中...' : '思考过程');
 const sourceHtml = computed(() => props.segment.markdown
 	? renderMarkdown(props.segment.markdown, { context: 'thinking' })
 	: '<p class="thinking-placeholder">Thinking content is streaming.</p>');

@@ -84,7 +84,6 @@ it('applies and ACKs the correlated first snapshot, streams shared blocks, and c
 	wrapper = await mountVisiblePane();
 	expect(window.activityFixture.requests.some((request) => request.type === 'activity-panel/rendered')).toBe(true);
 	expect(wrapper.find('.thinking-summary').exists()).toBe(true);
-	await wrapper.find('.thinking-summary').trigger('click');
 	expect(wrapper.find('.thinking-content').text()).toContain('Reasoning for');
 	await wrapper.find('.tool-summary').trigger('click');
 	window.activityFixture.text(' grows');
@@ -119,11 +118,13 @@ it('applies and ACKs the correlated first snapshot, streams shared blocks, and c
 
 it('preserves thinking expansion after switching tasks and does not nest buttons', async () => {
 	wrapper = await mountVisiblePane();
-	await wrapper.find('.thinking-summary').trigger('click');
-	await choose(1);
-	expect(wrapper.find('.thinking-content').exists()).toBe(false);
-	await choose(0);
 	expect(wrapper.find('.thinking-content').exists()).toBe(true);
+	await wrapper.find('.thinking-summary').trigger('click');
+	expect(wrapper.find('.thinking-content').exists()).toBe(false);
+	await choose(1);
+	expect(wrapper.find('.thinking-content').exists()).toBe(true);
+	await choose(0);
+	expect(wrapper.find('.thinking-content').exists()).toBe(false);
 	expect(wrapper.findAll('button button')).toHaveLength(0);
 });
 
