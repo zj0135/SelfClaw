@@ -13,6 +13,7 @@ using SelfClaw.Infrastructure.Agents.Cli.Adapters.Abstractions;
 using SelfClaw.Infrastructure.Agents.Cli.Process;
 using SelfClaw.Infrastructure.Agents.Cli.Session;
 using SelfClaw.Infrastructure.Agents.Cli.Session.Abstractions;
+using SelfClaw.Infrastructure.Agents.Conversations;
 using SelfClaw.Infrastructure.Agents.Runtime;
 using SelfClaw.Infrastructure.AiProviders;
 using SelfClaw.Infrastructure.AiProviders.Abstractions;
@@ -163,6 +164,9 @@ public static class ServiceCollectionExtensions
             serviceProvider.GetRequiredService<IAiModelCatalog>(),
             serviceProvider.GetRequiredService<IDirectTokenCounter>(),
             serviceProvider.GetService<ILogger<DirectContextCompressor>>()));
+        services.AddSingleton<IConversationTitleGenerator>(serviceProvider => new ConversationTitleGenerator(
+            serviceProvider.GetRequiredService<IAiChatClientFactory>(),
+            serviceProvider.GetService<ILogger<ConversationTitleGenerator>>()));
         // A host that owns the compaction settings replaces this registration with its own policy source.
         services.AddSingleton<IDirectCompressionPolicySource>(DisabledDirectCompressionPolicySource.Instance);
         services.AddSingleton(serviceProvider =>

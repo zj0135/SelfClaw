@@ -60,6 +60,7 @@ internal sealed class ConversationInputTestHarness : IDisposable
             new ConversationTurnRecorder(Fixture.Conversations, Fixture.Turns, Fixture.Inputs, NullLogger<ConversationTurnRecorder>.Instance),
             activeRuntime, _sessions, Runs, _activity, approval, questions, ProgrammingSettingsTestFactory.Create(settings),
             new ConversationCompletionNotifier(new DesktopNotificationService(NullLogger<DesktopNotificationService>.Instance)),
+            new ConversationTitleService(new NoOpConversationTitleGenerator(), Fixture.Conversations, NullLogger<ConversationTitleService>.Instance),
             NullLogger<ConversationTurnEngine>.Instance);
         var validator = new ConversationInputExecutionValidator(Roots, Models, Agents);
         var recovery = new SqliteStartupRecovery(Fixture.Database, Fixture.RecoveryBeforeCommit);

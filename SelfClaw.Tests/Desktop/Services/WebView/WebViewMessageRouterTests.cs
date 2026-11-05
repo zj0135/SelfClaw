@@ -633,6 +633,10 @@ public sealed class WebViewMessageRouterTests
             _sessions = new ConversationSessionCoordinator(ConversationRepository, turns, new EmptyConversationCompactionRepository(), _runs, _transcriptPublisher);
             var programmingSettings = SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore);
             AgentRuntime = new RecordingAgentChatRuntime();
+            var titleService = new ConversationTitleService(
+                new SelfClaw.Tests.TestDoubles.NoOpConversationTitleGenerator(),
+                ConversationRepository,
+                NullLogger<ConversationTitleService>.Instance);
             _turnEngine = new ConversationTurnEngine(
                 turns,
                 new DesktopTurnFinalizer(
@@ -649,6 +653,7 @@ public sealed class WebViewMessageRouterTests
                 programmingSettings,
 
                 new NoOpCompletionNotifier(),
+                titleService,
                 NullLogger<ConversationTurnEngine>.Instance);
 
             var agentDefinitions = new DesktopAgentDefinitionService(storagePaths);
@@ -669,6 +674,7 @@ public sealed class WebViewMessageRouterTests
                 settingsStore,
                 workspaces,
                 new ConversationDeletionService(_runs, _sessions, new SelfClaw.Tests.TestDoubles.NoOpSubagentConversationLifecycle(), workspaces, ConversationRepository),
+                titleService,
                 NullLogger<MainWindowViewModel>.Instance);
             viewModel.InitializeAsync().GetAwaiter().GetResult();
 

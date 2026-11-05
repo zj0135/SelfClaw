@@ -204,6 +204,10 @@ public sealed class MainWindowViewModelSubmissionTests
                 delivery,
                 Dispatcher.CurrentDispatcher);
             var sessions = new ConversationSessionCoordinator(repository, turns, new EmptyConversationCompactionRepository(), runs, transcriptPublisher);
+            var titleService = new ConversationTitleService(
+                new SelfClaw.Tests.TestDoubles.NoOpConversationTitleGenerator(),
+                repository,
+                NullLogger<ConversationTitleService>.Instance);
             var turnEngine = new ConversationTurnEngine(
                 turns,
                 turnFinalizer,
@@ -217,6 +221,7 @@ public sealed class MainWindowViewModelSubmissionTests
                 userQuestionHandler,
                 SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
                 new ConversationCompletionNotifier(notificationService),
+                titleService,
                 NullLogger<ConversationTurnEngine>.Instance);
             var workspaces = new ConversationWorkspaceService(repository);
             var viewModel = new MainWindowViewModel(
@@ -232,6 +237,7 @@ public sealed class MainWindowViewModelSubmissionTests
                 settingsStore,
                 workspaces,
                 new ConversationDeletionService(runs, sessions, new NoOpSubagentConversationLifecycle(), workspaces, repository),
+                titleService,
                 NullLogger<MainWindowViewModel>.Instance);
 
             var harness = new Harness(conversation, storageRoot, activityCoordinator, runs, delivery, transcriptPublisher,

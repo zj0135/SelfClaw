@@ -115,6 +115,37 @@ public sealed class ConversationTurnEngineTests
     }
 
     [Fact]
+    public async Task First_user_message_kicks_off_title_generation_with_the_conversation_model()
+    {
+        using var context = new Context(new RecordingRuntime { Events = [new RunCompletedEvent(RunCompletionStatus.Succeeded, "done")] });
+        await context.ExecuteAsync();
+        var start = context.TitleStarter.Starts.Should().ContainSingle().Which;
+        start.ConversationId.Should().Be(context.ConversationId);
+        start.ExpectedTitle.Should().Be("prompt");
+        start.Prompt.Should().Be("prompt");
+        start.ModelProfileId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Follow_up_turns_do_not_kick_off_title_generation()
+    {
+        using var context = new Context(new RecordingRuntime { Events = [new RunCompletedEvent(RunCompletionStatus.Succeeded, "done")] });
+        var now = DateTimeOffset.UtcNow;
+        context.Repository.ReadMessages = (_, _) => Task.FromResult<IReadOnlyList<MessageRecord>>(
+            [new MessageRecord(Guid.NewGuid(), context.ConversationId, Guid.NewGuid(), 1, MessageRole.User, "earlier", MessageStatus.Sealed, now, now)]);
+        await context.ExecuteAsync();
+        context.TitleStarter.Starts.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Cli_turns_do_not_kick_off_title_generation()
+    {
+        using var context = new Context(new RecordingRuntime { Events = [new RunCompletedEvent(RunCompletionStatus.Succeeded, "done")] });
+        await context.ExecuteAsync(AgentExecutionMode.Cli);
+        context.TitleStarter.Starts.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task Preparing_history_is_registered_and_stop_prevents_the_start_transaction()
     {
         using var context = new Context(new RecordingRuntime());
@@ -227,7 +258,7 @@ public sealed class ConversationTurnEngineTests
             Engine = new(Turns, new(Turns, NullLogger<DesktopTurnFinalizer>.Instance),
                 new(Repository, Turns, Inputs, NullLogger<ConversationTurnRecorder>.Instance), runtime,
                 Sessions, Runs, _activity, approval, questions, ProgrammingSettingsTestFactory.Create(settings), Notifier,
-                NullLogger<ConversationTurnEngine>.Instance);
+                TitleStarter, NullLogger<ConversationTurnEngine>.Instance);
         }
         public Guid ConversationId { get; } = Guid.NewGuid();
         public Repository Repository { get; } = new();
@@ -237,6 +268,7 @@ public sealed class ConversationTurnEngineTests
         public ConversationSessionCoordinator Sessions { get; }
         public ConversationTurnEngine Engine { get; }
         public Notifier Notifier { get; } = new();
+        public RecordingTitleStarter TitleStarter { get; } = new();
         public ConversationRunHandle Reserve(AgentExecutionMode mode = AgentExecutionMode.Direct)
             => Runs.TryReserve(ConversationId, mode, DirectTurnOrigin.Interactive) ?? throw new InvalidOperationException();
         public DesktopConversationTurnRequest Request(AgentExecutionMode mode = AgentExecutionMode.Direct)
@@ -277,6 +309,12 @@ public sealed class ConversationTurnEngineTests
             await Release.Task.WaitAsync(cancellationToken);
             yield return new RunCompletedEvent(RunCompletionStatus.Succeeded, "done");
         }
+    }
+
+    private sealed class RecordingTitleStarter : IConversationTitleStarter
+    {
+        public List<ConversationTitleStart> Starts { get; } = [];
+        public void TryStart(ConversationTitleStart start) => Starts.Add(start);
     }
 
     private sealed class Notifier : IConversationCompletionNotifier

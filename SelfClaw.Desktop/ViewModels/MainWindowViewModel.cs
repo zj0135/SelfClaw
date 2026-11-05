@@ -37,6 +37,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private readonly DesktopSettingsJsonStore _settingsStore;
     private readonly ConversationWorkspaceService _workspaces;
     private readonly ConversationDeletionService _deletion;
+    private readonly ConversationTitleService _titleService;
     private readonly Dispatcher? _dispatcher;
     private readonly ILogger<MainWindowViewModel> _logger;
 
@@ -71,6 +72,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         DesktopSettingsJsonStore settingsStore,
         ConversationWorkspaceService workspaces,
         ConversationDeletionService deletion,
+        ConversationTitleService titleService,
         ILogger<MainWindowViewModel> logger,
         Dispatcher? dispatcher = null)
     {
@@ -86,6 +88,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _settingsStore = settingsStore;
         _workspaces = workspaces;
         _deletion = deletion;
+        _titleService = titleService;
         _dispatcher = dispatcher;
         _logger = logger;
         _transcriptPublisher.Attach(BuildTranscriptProjectionRequest);
@@ -93,6 +96,7 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _extensionChanges.StateChanged += OnExtensionStateChanged;
         _conversationSessions.SelectedStateChanged += OnSelectedRuntimeChanged;
         _runs.Changed += OnRunChanged;
+        _titleService.TitleChanged += OnConversationTitleChanged;
     }
 
     #endregion
@@ -732,9 +736,11 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
         _extensionChanges.StateChanged -= OnExtensionStateChanged;
         _conversationSessions.SelectedStateChanged -= OnSelectedRuntimeChanged;
         _runs.Changed -= OnRunChanged;
+        _titleService.TitleChanged -= OnConversationTitleChanged;
     }
 
     private void OnRunChanged(ConversationRunChange _) => RunOnUi(() => _transcriptPublisher.PublishNow(false));
+    private void OnConversationTitleChanged(Guid conversationId) => RunOnUi(() => _ = ReloadConversationsAsync());
     private void OnAgentsChanged() => RunOnUi(() => { ReloadAgents(); PublishShell(false); });
     private void OnExtensionStateChanged(long revision) => RunOnUi(() => UpdateCapabilityRevision(revision));
     private void OnSelectedRuntimeChanged() => RunOnUi(() => OnPropertyChanged(string.Empty));

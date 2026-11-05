@@ -210,10 +210,12 @@ public sealed class ShellStateTests
             var inputs = new SqliteConversationInputRepository(database);
             _runs = new ConversationRunCoordinator(inputs, inputs, new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
             _sessions = new ConversationSessionCoordinator(conversations, turns, new EmptyConversationCompactionRepository(), _runs, _publisher);
+            var titleService = new ConversationTitleService(new SelfClaw.Tests.TestDoubles.NoOpConversationTitleGenerator(),
+                conversations, NullLogger<ConversationTitleService>.Instance);
             _engine = new ConversationTurnEngine(turns, new DesktopTurnFinalizer(turns, NullLogger<DesktopTurnFinalizer>.Instance),
                 new ConversationTurnRecorder(conversations, turns, inputs, NullLogger<ConversationTurnRecorder>.Instance), Runtime,
                 _sessions, _runs, _activity, approval, questions, SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settings), new SilentCompletion(),
-                NullLogger<ConversationTurnEngine>.Instance);
+                titleService, NullLogger<ConversationTurnEngine>.Instance);
             var workspaces = new ConversationWorkspaceService(_roots, query: Query);
             var changes = new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier();
             Agents = new AgentSettingsService(new DesktopAgentDefinitionService(paths),
@@ -223,6 +225,7 @@ public sealed class ShellStateTests
             ViewModel = new MainWindowViewModel(conversations, _engine, _runs, Inputs, _sessions, _activity, _publisher,
                 Agents, changes, settings, workspaces,
                 new ConversationDeletionService(_runs, _sessions, new NoOpSubagentConversationLifecycle(), workspaces, conversations),
+                titleService,
                 NullLogger<MainWindowViewModel>.Instance, Dispatcher.CurrentDispatcher);
         }
 

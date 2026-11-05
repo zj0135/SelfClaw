@@ -98,6 +98,9 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<SubagentDeliveryDispatcher>());
         services.AddSingleton<IConversationCompletionNotifier, ConversationCompletionNotifier>();
         services.AddSingleton<ConversationRunCoordinator>();
+        services.AddSingleton<ConversationTitleService>();
+        services.AddSingleton<IConversationTitleStarter>(services =>
+            services.GetRequiredService<ConversationTitleService>());
         services.AddSingleton<ConversationTurnEngine>();
         services.AddSingleton<ConversationInputChangeNotifier>();
         services.AddSingleton<ConversationInputExecutionValidator>();
@@ -193,6 +196,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<DesktopSettingsJsonStore>(),
             services.GetRequiredService<ConversationWorkspaceService>(),
             services.GetRequiredService<ConversationDeletionService>(),
+            services.GetRequiredService<ConversationTitleService>(),
             services.GetRequiredService<ILogger<MainWindowViewModel>>(),
             dispatcher));
         services.AddSingleton<IWorkspaceSelectionController>(services =>

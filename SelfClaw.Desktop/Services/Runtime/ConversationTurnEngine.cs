@@ -24,6 +24,7 @@ internal sealed class ConversationTurnEngine
     private readonly DesktopUserQuestionHandler _userQuestions;
     private readonly ProgrammingAssistantSettingsService _programmingAssistantSettings;
     private readonly IConversationCompletionNotifier _completionNotifier;
+    private readonly IConversationTitleStarter _titleStarter;
     private readonly ILogger<ConversationTurnEngine> _logger;
 
     public ConversationTurnEngine(IConversationTurnRepository turns, DesktopTurnFinalizer turnFinalizer,
@@ -31,7 +32,7 @@ internal sealed class ConversationTurnEngine
         ConversationRunCoordinator runs, AgentActivityCoordinator activity, DesktopToolApprovalHandler approval,
         DesktopUserQuestionHandler userQuestions,
         ProgrammingAssistantSettingsService programmingAssistantSettings, IConversationCompletionNotifier completionNotifier,
-        ILogger<ConversationTurnEngine> logger)
+        IConversationTitleStarter titleStarter, ILogger<ConversationTurnEngine> logger)
     {
         _turns = turns;
         _turnFinalizer = turnFinalizer;
@@ -44,6 +45,7 @@ internal sealed class ConversationTurnEngine
         _userQuestions = userQuestions;
         _programmingAssistantSettings = programmingAssistantSettings;
         _completionNotifier = completionNotifier;
+        _titleStarter = titleStarter;
         _logger = logger;
     }
 
@@ -61,6 +63,9 @@ internal sealed class ConversationTurnEngine
             ValidateRequest(handle, request);
             var conversation = CreateConversation(handle.ConversationId, request);
             state = await _sessions.PrepareRuntimeStateAsync(conversation, false, handle.CancellationToken);
+            // A first user message means the loaded history is empty; the start commit below only carries the
+            // new message, so this check has to happen before the message is merged into the state.
+            var isFirstUserMessage = state.Messages.Count == 0;
             var userMessageId = request.InputClaim?.MessageId ?? Guid.NewGuid();
             var started = await _turns.StartTurnAsync(new(conversation,
                 new(handle.TurnId, conversation.Id, handle.Mode, handle.Origin, ConversationTurnStatus.Running, DateTimeOffset.UtcNow),
@@ -73,6 +78,8 @@ internal sealed class ConversationTurnEngine
             _turnRecorder.BeginTurn(state, turn);
             BeginActivity(conversation, request.Agent, turn);
             activityStarted = true;
+            if (isFirstUserMessage && handle.Mode == AgentExecutionMode.Direct)
+                _titleStarter.TryStart(new ConversationTitleStart(conversation.Id, conversation.Title, request.Prompt, request.ModelProfileId));
             var chatRequest = await BuildChatTurnRequestAsync(handle, state, request);
             await StreamTurnAsync(handle, state, turn, chatRequest);
             if (!turn.Completed && turn.PendingFinalization is null)
