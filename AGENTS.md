@@ -74,6 +74,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - `read_file` 读取图片（tool result 携带图片、三种协议投递、live-only 回放）：`docs/direct-tool-result-image-design.md`。
 - Direct `ask_user` 提问工具（强制中断语义、AskUserRules 限额、绑定闸门、`questionRequestId` 协议）：`docs/direct-ask-user-design.md`。
 - 桌面/前端：`docs/message-segments-system-design.md`。
+- 侧栏会话分组（项目 / 对话 / 归档：168 小时归档判定、宿主导航时间戳、文件夹 id 前缀与陈旧 `updated_at` 陷阱）：`docs/sidebar-archive-design.md`。
 - 右侧功能面板（聊天视图 SideDock：终端 / 子代理看板的承载、开合与宿主终端状态映射、新增工具 tab 的方式）：`docs/side-dock-design.md`。
 - 右侧面板「审查」工具（工作区 Git diff：`git-diff/*` 协议与「非仓库不是错误」的回包规则、workspace 子树作用域、未跟踪文件合成、限额与空态）：`docs/git-review-pane-design.md`。
 - 关于页应用用量仪表盘：`docs/app-usage-dashboard-design.md`（数据契约、热力图/趋势/环形口径、SQL 分桶边界）。

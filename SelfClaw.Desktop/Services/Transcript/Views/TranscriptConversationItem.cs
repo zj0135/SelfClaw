@@ -11,4 +11,5 @@ public sealed record TranscriptConversationItem(
     string? GitRepositoryName = null,
     string? GitBranchName = null,
     bool IsManagedWorktree = false,
-    bool IsRunning = false);
+    bool IsRunning = false,
+    string? UpdatedAtUtc = null);

@@ -54,3 +54,20 @@ it('clears the workspace when the conversation group plus starts a new chat', as
 	expect(bridge.request).toHaveBeenCalledWith('new-chat', {});
 	wrapper.unmount();
 });
+
+// 归档分组排在「对话」之后：它是时间推导出来的分组，既没有加号也没有自己的 action。
+it('exposes the archive group after conversations with the folder layout and no create action', () => {
+	const wrapper = mountNavigation();
+
+	const groups = wrapper.vm.navigation.navItems.value.filter((item) => item.type === 'group');
+
+	expect(groups.map((group) => group.id)).toEqual(['projects', 'conversations', 'archived']);
+	expect(groups[2]).toMatchObject({
+		label: '归档',
+		layout: 'folders',
+		canCreate: false,
+		emptyText: '暂无归档会话',
+		children: [],
+	});
+	wrapper.unmount();
+});

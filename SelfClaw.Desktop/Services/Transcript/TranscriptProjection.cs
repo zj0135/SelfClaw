@@ -265,7 +265,7 @@ public sealed class TranscriptProjection
         return new(conversation.Id.ToString("D"), conversation.Title,
             conversation.UpdatedAtUtc.LocalDateTime.ToString("yyyy-MM-dd HH:mm"), conversation.WorkspaceRootId?.ToString("D"),
             root?.Name, root?.RootPath, root?.GitRepositoryId?.ToString("D"), root?.GitRepositoryName, root?.GitBranchName,
-            root?.IsManagedWorktree == true, isRunning);
+            root?.IsManagedWorktree == true, isRunning, conversation.UpdatedAtUtc.ToString("O"));
     }
 
     private static bool SameReferences<T>(IReadOnlyList<T> left, IReadOnlyList<T> right) where T : class

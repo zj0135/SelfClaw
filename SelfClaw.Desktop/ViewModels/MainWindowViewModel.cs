@@ -656,13 +656,16 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private void ApplyAdmittedConversation(ConversationRecord conversation, bool preferSelection)
     {
         _dispatcher?.VerifyAccess();
-        _allConversations.RemoveAll(item => item.Id == conversation.Id);
-        _allConversations.Insert(0, conversation);
+        // 老会话再发一条时带的是入库时的旧 updated_at，而侧栏排序与「归档」判定都读它：
+        // 不在这里刷新，刚发过消息的会话会继续赖在归档里到下次重载列表为止。
+        var admitted = conversation with { UpdatedAtUtc = DateTimeOffset.UtcNow };
+        _allConversations.RemoveAll(item => item.Id == admitted.Id);
+        _allConversations.Insert(0, admitted);
         if (preferSelection)
         {
-            SelectWorkspaceRoot(_workspaceRoots.FirstOrDefault(item => item.Id == conversation.WorkspaceRootId), publishShell: false);
-            SyncSelectedAgentFromConversation(conversation);
-            _ = SelectConversationCoreAsync(conversation);
+            SelectWorkspaceRoot(_workspaceRoots.FirstOrDefault(item => item.Id == admitted.WorkspaceRootId), publishShell: false);
+            SyncSelectedAgentFromConversation(admitted);
+            _ = SelectConversationCoreAsync(admitted);
         }
         ReplaceList(_filteredConversations, GetFilteredConversations());
         PublishShell(false);

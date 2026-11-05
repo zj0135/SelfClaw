@@ -1,8 +1,13 @@
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, onUnmounted, ref } from 'vue';
 import { useHostBridge, isSuperseded } from './hostBridge.js';
 import { useTranscriptBridge } from './transcriptBridge.js';
 import { useToast } from './useToast.js';
 import { useConfirm } from './useConfirm.js';
+import { buildSidebarGroups } from '../renderers/sidebarGroups.js';
+
+// 「归档」是按时间推导出来的：挂机过夜、跨过第 7 天边界都得自己迁移，
+// 所以不靠宿主推布尔值，而是定期把 now 往前推一步重算分组。
+const ARCHIVE_TICK_MS = 15 * 60 * 1000;
 
 export function useConversationNavigation(currentViewId, chatViewRef) {
 	const { on, request } = useHostBridge();
@@ -12,6 +17,7 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 	const sidebarConversations = ref([]);
 	const selectedConversationId = ref(null);
 	const isSelectedBusy = ref(false);
+	const now = ref(Date.now());
 	transcript.on((payload) => {
 		if (sidebarConversations.value !== payload.conversations) sidebarConversations.value = payload.conversations || [];
 		selectedConversationId.value = payload.selectedConversationId || null;
@@ -26,53 +32,33 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 		currentViewId.value = 'chat';
 	});
 
-	function toConversationNode(conversation) {
-		const isSelected = conversation.id === selectedConversationId.value;
-		return {
-			id: conversation.id,
-			label: conversation.title || '未命名对话',
-			time: conversation.timestamp || '',
-			type: 'conversation',
-			isManagedWorktree: Boolean(conversation.isManagedWorktree),
-			workspaceRootId: conversation.workspaceRootId || null,
-			// 右键「工作目录」要用工作区根的名字与路径，不是会话标题。
-			workspaceRootName: conversation.workspaceRootName || '',
-			workspaceRootPath: conversation.workspaceRootPath || '',
-			isRunning: Boolean(conversation.isRunning || (isSelected && isSelectedBusy.value)),
-		};
+	const timer = setInterval(() => {
+		now.value = Date.now();
+	}, ARCHIVE_TICK_MS);
+	// 系统休眠后定时器会被一起冻住：回到前台先对一次表，别等下一次 tick。
+	const refreshNow = () => {
+		now.value = Date.now();
+	};
+	if (typeof window !== 'undefined') {
+		window.addEventListener('focus', refreshNow);
+		document.addEventListener('visibilitychange', refreshNow);
 	}
-
-	function hasWorkspace(conversation) {
-		return Boolean(conversation?.workspaceRootId || conversation?.workspaceRootPath || conversation?.workspaceRootName);
-	}
-
-	function buildProjectGroups(conversations) {
-		const groups = new Map();
-		for (const conversation of conversations.filter(hasWorkspace)) {
-			const key =
-				conversation.gitRepositoryId ||
-				conversation.workspaceRootId ||
-				conversation.workspaceRootPath ||
-				conversation.workspaceRootName ||
-				'workspace';
-			if (!groups.has(key)) {
-				groups.set(key, {
-					id: `workspace-${key}`,
-					label: conversation.gitRepositoryName || conversation.workspaceRootName || conversation.workspaceRootPath || '工作区',
-					workspaceRootId: conversation.workspaceRootId || null,
-					workspaceRootName: conversation.workspaceRootName || '',
-					workspaceRootPath: conversation.workspaceRootPath || '',
-					gitRepositoryId: conversation.gitRepositoryId || null,
-					type: 'folder',
-					children: [],
-				});
-			}
-
-			groups.get(key).children.push(toConversationNode(conversation));
+	onUnmounted(() => {
+		clearInterval(timer);
+		if (typeof window !== 'undefined') {
+			window.removeEventListener('focus', refreshNow);
+			document.removeEventListener('visibilitychange', refreshNow);
 		}
+	});
 
-		return Array.from(groups.values());
-	}
+	const groups = computed(() =>
+		buildSidebarGroups({
+			conversations: sidebarConversations.value,
+			selectedConversationId: selectedConversationId.value,
+			selectedIsBusy: isSelectedBusy.value,
+			now: now.value,
+		}),
+	);
 
 	const navItems = computed(() => [
 		{ id: 'new-chat', label: '新建对话', type: 'action' },
@@ -91,13 +77,29 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 			id: 'projects',
 			label: '项目',
 			type: 'group',
-			children: buildProjectGroups(sidebarConversations.value),
+			layout: 'folders',
+			canCreate: true,
+			emptyText: '暂无项目会话',
+			children: groups.value.projects,
 		},
 		{
 			id: 'conversations',
 			label: '对话',
 			type: 'group',
-			children: sidebarConversations.value.filter((conversation) => !hasWorkspace(conversation)).map(toConversationNode),
+			layout: 'list',
+			canCreate: true,
+			emptyText: '暂无会话记录',
+			children: groups.value.conversations,
+		},
+		{
+			id: 'archived',
+			label: '归档',
+			type: 'group',
+			layout: 'folders',
+			// 归档是时间推导出来的，没有「新建归档」这种操作。
+			canCreate: false,
+			emptyText: '暂无归档会话',
+			children: groups.value.archived,
 		},
 		{ id: 'settings', label: '设置', type: 'view' },
 	]);

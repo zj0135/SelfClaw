@@ -5,6 +5,7 @@ using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.Settings;
 using SelfClaw.Desktop.Services.Tools;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Windows.Threading;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -30,104 +31,40 @@ public sealed class MainWindowViewModelSubmissionTests
     [Fact]
     public async Task SubmitPromptAsync_accepts_direct_through_the_input_coordinator_without_executing_a_turn()
     {
-        var conversation = CreateConversation(Guid.NewGuid());
-        var repository = new ControlledConversationRepository(conversation);
-        var runtime = new RecordingAgentChatRuntime();
-        var inputs = new FakeConversationInputCoordinator();
-        var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
-        var storagePaths = StoragePathDefaults.Create(
-            storageRoot,
-            Path.Combine(storageRoot, "selfclaw.db"),
-            Path.Combine(storageRoot, "secrets"));
+        using var harness = await Harness.CreateAsync(CreateConversation(Guid.NewGuid(), DateTimeOffset.UtcNow));
 
-        try
-        {
-            var toolApprovalHandler = new DesktopToolApprovalHandler();
-            var userQuestionHandler = new DesktopUserQuestionHandler();
-            using var activityCoordinator = new AgentActivityCoordinator(
-                toolApprovalHandler,
-                userQuestionHandler,
-                NullLogger<AgentActivityCoordinator>.Instance);
-            var notificationService = new DesktopNotificationService(
-                NullLogger<DesktopNotificationService>.Instance);
-            var settingsStore = new DesktopSettingsJsonStore(storagePaths);
-            var turns = new RecordingConversationTurnRepository(repository);
-            var inputStore = new EmptyConversationInputRepository();
-            using var runs = new ConversationRunCoordinator(inputStore, new EmptyConversationInputSteeringStore(), new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
-            var turnFinalizer = new DesktopTurnFinalizer(
-                turns,
-                NullLogger<DesktopTurnFinalizer>.Instance);
-            var projection = new TranscriptProjection(storagePaths);
-            using var delivery = new TranscriptDelivery(new WebViewHostChannel(), Dispatcher.CurrentDispatcher);
-            using var transcriptPublisher = new TranscriptPublisher(
-                projection,
-                delivery,
-                Dispatcher.CurrentDispatcher);
-            using var sessions = new ConversationSessionCoordinator(repository, turns, new EmptyConversationCompactionRepository(), runs, transcriptPublisher);
-            var turnEngine = new ConversationTurnEngine(
-                turns,
-                turnFinalizer,
-                new ConversationTurnRecorder(
-                    repository, turns, inputStore,
-                    NullLogger<ConversationTurnRecorder>.Instance),
-                runtime,
-                sessions, runs,
-                activityCoordinator,
-                toolApprovalHandler,
-                userQuestionHandler,
-                SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
-                new ConversationCompletionNotifier(notificationService),
-                NullLogger<ConversationTurnEngine>.Instance);
-            var workspaces = new ConversationWorkspaceService(repository);
-            var vm = new MainWindowViewModel(
-                repository,
-                turnEngine, runs, inputs,
-                sessions,
-                activityCoordinator,
-                transcriptPublisher,
-                new AgentSettingsService(new DesktopAgentDefinitionService(storagePaths),
-                    new SubagentDefinitionCatalog(storagePaths),
-                    new EmptyExtensionSettingsService(), new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier()),
-                new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier(),
-                settingsStore,
-                workspaces,
-                new ConversationDeletionService(runs, sessions, new NoOpSubagentConversationLifecycle(), workspaces, repository),
-                NullLogger<MainWindowViewModel>.Instance);
+        var result = await harness.ViewModel.SubmitPromptAsync("first prompt");
 
-            await vm.InitializeAsync();
-            repository.CompleteMessages(conversation.Id, []);
-            repository.CompleteToolRuns(conversation.Id, []);
-            await vm.SelectConversationAsync(conversation.Id);
-
-            var result = await vm.SubmitPromptAsync("first prompt");
-
-            result.Accepted.Should().BeTrue();
-            inputs.Submissions.Should().ContainSingle().Which.Prompt.Should().Be("first prompt");
-            inputs.Submissions[0].ConversationId.Should().Be(conversation.Id);
-            // The view model never starts a turn directly: Direct execution belongs to the dispatcher.
-            runtime.Requests.Should().BeEmpty();
-        }
-        finally
-        {
-            if (Directory.Exists(storageRoot))
-            {
-                Directory.Delete(storageRoot, recursive: true);
-            }
-        }
+        result.Accepted.Should().BeTrue();
+        harness.Inputs.Submissions.Should().ContainSingle().Which.Prompt.Should().Be("first prompt");
+        harness.Inputs.Submissions[0].ConversationId.Should().Be(harness.Conversation.Id);
+        // The view model never starts a turn directly: Direct execution belongs to the dispatcher.
+        harness.Runtime.Requests.Should().BeEmpty();
     }
 
-    private static ConversationRecord CreateConversation(Guid id)
+    // 再发一条消息就是「最后一次对话时间」前进：不刷新它，刚发过消息的会话会继续赖在侧栏归档里，
+    // 而列表重载只发生在初始化 / 删除 / 重命名之后。
+    [Fact]
+    public async Task SubmitPromptAsync_refreshes_the_navigation_timestamp_of_an_existing_conversation()
     {
-        var now = DateTimeOffset.UtcNow;
-        return new ConversationRecord(
+        var stale = DateTimeOffset.UtcNow.AddDays(-30);
+        using var harness = await Harness.CreateAsync(CreateConversation(Guid.NewGuid(), stale));
+
+        (await harness.ViewModel.SubmitPromptAsync("follow up")).Accepted.Should().BeTrue();
+
+        var published = harness.LastNavigationTimestamp();
+        published.Should().BeAfter(DateTimeOffset.UtcNow.AddMinutes(-5));
+    }
+
+    private static ConversationRecord CreateConversation(Guid id, DateTimeOffset updatedAtUtc)
+        => new(
             id,
             "Conversation",
             null,
             ToolPermissionMode.RequireApproval,
             "build",
-            now,
-            now);
-    }
+            updatedAtUtc,
+            updatedAtUtc);
 
     private sealed class RecordingAgentChatRuntime : IAgentChatRuntime
     {
@@ -190,5 +127,162 @@ public sealed class MainWindowViewModelSubmissionTests
 
         public Task DeleteWorkspaceRootAsync(Guid workspaceRootId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
+    }
+
+    // 整条 ViewModel 链路的装配只写一次：宿主消息列表就是 shell 发出去的 JSON，
+    // 断言导航数据不必为了拿到它另开一条内存通道。
+    private sealed class Harness : IDisposable
+    {
+        private readonly string _storageRoot;
+        private readonly AgentActivityCoordinator _activityCoordinator;
+        private readonly ConversationRunCoordinator _runs;
+        private readonly TranscriptDelivery _delivery;
+        private readonly TranscriptPublisher _transcriptPublisher;
+
+        private Harness(ConversationRecord conversation, string storageRoot, AgentActivityCoordinator activityCoordinator,
+            ConversationRunCoordinator runs, TranscriptDelivery delivery, TranscriptPublisher transcriptPublisher,
+            FakeConversationInputCoordinator inputs,
+            RecordingAgentChatRuntime runtime, MainWindowViewModel viewModel, List<string> hostMessages)
+        {
+            Conversation = conversation;
+            _storageRoot = storageRoot;
+            _activityCoordinator = activityCoordinator;
+            _runs = runs;
+            _delivery = delivery;
+            _transcriptPublisher = transcriptPublisher;
+            Inputs = inputs;
+            Runtime = runtime;
+            ViewModel = viewModel;
+            HostMessages = hostMessages;
+        }
+
+        public ConversationRecord Conversation { get; }
+        public FakeConversationInputCoordinator Inputs { get; }
+        public RecordingAgentChatRuntime Runtime { get; }
+        public MainWindowViewModel ViewModel { get; }
+        public List<string> HostMessages { get; }
+
+        public static async Task<Harness> CreateAsync(ConversationRecord conversation)
+        {
+            var repository = new ControlledConversationRepository(conversation);
+            var runtime = new RecordingAgentChatRuntime();
+            var inputs = new FakeConversationInputCoordinator();
+            var storageRoot = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
+            var storagePaths = StoragePathDefaults.Create(
+                storageRoot,
+                Path.Combine(storageRoot, "selfclaw.db"),
+                Path.Combine(storageRoot, "secrets"));
+            var toolApprovalHandler = new DesktopToolApprovalHandler();
+            var userQuestionHandler = new DesktopUserQuestionHandler();
+            var activityCoordinator = new AgentActivityCoordinator(
+                toolApprovalHandler,
+                userQuestionHandler,
+                NullLogger<AgentActivityCoordinator>.Instance);
+            var notificationService = new DesktopNotificationService(
+                NullLogger<DesktopNotificationService>.Instance);
+            var settingsStore = new DesktopSettingsJsonStore(storagePaths);
+            var turns = new RecordingConversationTurnRepository(repository);
+            var inputStore = new EmptyConversationInputRepository();
+            var runs = new ConversationRunCoordinator(inputStore, new EmptyConversationInputSteeringStore(), new ConversationInputChangeNotifier(), NullLogger<ConversationRunCoordinator>.Instance);
+            var turnFinalizer = new DesktopTurnFinalizer(
+                turns,
+                NullLogger<DesktopTurnFinalizer>.Instance);
+            var projection = new TranscriptProjection(storagePaths);
+            var hostMessages = new List<string>();
+            var channel = new WebViewHostChannel();
+            TranscriptDelivery? delivery = null;
+            // 宿主不 ack 就只有第一条 payload 能出去：把每条待发快照都确认掉，才能读到最新一次发布。
+            channel.Attach(json =>
+            {
+                hostMessages.Add(json);
+                delivery?.Acknowledge(ReadRevision(json));
+            });
+            delivery = new TranscriptDelivery(channel, Dispatcher.CurrentDispatcher);
+            channel.MarkReady();
+            var transcriptPublisher = new TranscriptPublisher(
+                projection,
+                delivery,
+                Dispatcher.CurrentDispatcher);
+            var sessions = new ConversationSessionCoordinator(repository, turns, new EmptyConversationCompactionRepository(), runs, transcriptPublisher);
+            var turnEngine = new ConversationTurnEngine(
+                turns,
+                turnFinalizer,
+                new ConversationTurnRecorder(
+                    repository, turns, inputStore,
+                    NullLogger<ConversationTurnRecorder>.Instance),
+                runtime,
+                sessions, runs,
+                activityCoordinator,
+                toolApprovalHandler,
+                userQuestionHandler,
+                SelfClaw.Tests.TestDoubles.ProgrammingSettingsTestFactory.Create(settingsStore),
+                new ConversationCompletionNotifier(notificationService),
+                NullLogger<ConversationTurnEngine>.Instance);
+            var workspaces = new ConversationWorkspaceService(repository);
+            var viewModel = new MainWindowViewModel(
+                repository,
+                turnEngine, runs, inputs,
+                sessions,
+                activityCoordinator,
+                transcriptPublisher,
+                new AgentSettingsService(new DesktopAgentDefinitionService(storagePaths),
+                    new SubagentDefinitionCatalog(storagePaths),
+                    new EmptyExtensionSettingsService(), new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier()),
+                new SelfClaw.Infrastructure.Extensions.ExtensionStateChangeNotifier(),
+                settingsStore,
+                workspaces,
+                new ConversationDeletionService(runs, sessions, new NoOpSubagentConversationLifecycle(), workspaces, repository),
+                NullLogger<MainWindowViewModel>.Instance);
+
+            var harness = new Harness(conversation, storageRoot, activityCoordinator, runs, delivery, transcriptPublisher,
+                inputs, runtime, viewModel, hostMessages);
+            try
+            {
+                await viewModel.InitializeAsync();
+                repository.CompleteMessages(conversation.Id, []);
+                repository.CompleteToolRuns(conversation.Id, []);
+                await viewModel.SelectConversationAsync(conversation.Id);
+                return harness;
+            }
+            catch
+            {
+                harness.Dispose();
+                throw;
+            }
+        }
+
+        private static long ReadRevision(string payload)
+        {
+            using var document = JsonDocument.Parse(payload);
+            return document.RootElement.GetProperty("revision").GetInt64();
+        }
+
+        public DateTimeOffset LastNavigationTimestamp()
+        {
+            // 补丁只有导航真的变了才带 conversations：倒着找最近一条真正装着导航数据的上报。
+            for (var index = HostMessages.Count - 1; index >= 0; index--)
+            {
+                using var payload = JsonDocument.Parse(HostMessages[index]);
+                if (!payload.RootElement.TryGetProperty("conversations", out var conversations)) continue;
+                var item = conversations.EnumerateArray()
+                    .Single(conversation => conversation.GetProperty("id").GetString() == Conversation.Id.ToString("D"));
+                return DateTimeOffset.Parse(item.GetProperty("updatedAtUtc").GetString()!);
+            }
+
+            throw new InvalidOperationException("No published transcript payload carried navigation data.");
+        }
+
+        public void Dispose()
+        {
+            ViewModel.Dispose();
+            _transcriptPublisher.Dispose();
+            _delivery.Dispose();
+            _runs.Dispose();
+            _activityCoordinator.Dispose();
+            if (Directory.Exists(_storageRoot))
+            {
+                Directory.Delete(_storageRoot, recursive: true);
+            }
+        }
     }
 }

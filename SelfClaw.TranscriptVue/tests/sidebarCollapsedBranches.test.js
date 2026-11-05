@@ -14,6 +14,7 @@ function items() {
 			id: 'projects',
 			label: '项目',
 			type: 'group',
+			layout: 'folders',
 			children: [
 				{
 					id: 'workspace-repo',
@@ -24,7 +25,7 @@ function items() {
 				},
 			],
 		},
-		{ id: 'conversations', label: '对话', type: 'group', children: [conversation('c-3', '普通会话 A')] },
+		{ id: 'conversations', label: '对话', type: 'group', layout: 'list', children: [conversation('c-3', '普通会话 A')] },
 	];
 }
 
