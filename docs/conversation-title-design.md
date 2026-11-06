@@ -30,10 +30,12 @@
 3. 生成标题 ≤48 字符与转录截断（`ConversationTitles.MaximumLength`）对齐；手动重命名上限仍是 120 字符，两者互不干扰。
 4. 残余竞态只有毫秒级「重读之后、写入之前会话被删」窗口，与既有重命名/通知路径同等级，不额外加锁。
 5. 关闭顺序：服务在 host dispose 时先 cancel 再限时等待在途生成，落在 App 的 20 秒关闭预算内；生成完成后的 CAS 读写用 `CancellationToken.None`（本地 SQLite 快操作），不会让关闭悬挂。
+6. **标题只能取列表里那份记录，composer 快照永不回填**：`ApplyAdmittedConversation` 拿到的是提交时带的 `ConversationRecord`，它是「选中该会话那一刻」的副本；总结标题在回合中途写库后只靠 `ReloadConversationsAsync` 进列表。若 `ApplyConversationFilter` 在选中会话被重载时提前返回（只认 id 相同），`SelectedConversation` 会一直停在旧记录上，紧接着再发一条（steer 走的就是这条入口）就会把首条消息的截断标题写回侧栏，而且此后没有任何一次重载能纠正它——标题变化的 `TitleChanged` 已经用掉了。所以两条都要守：选中会话被重载时采用新记录；对已存在的会话，`ApplyAdmittedConversation` 只沿用列表里的标题，只刷新活动时间。
 
 ## 4. 验收
 
 - 新建会话发第一条消息 → 数秒内侧栏标题变为总结标题（与用户消息同语言）；切走再回来保持。
+- 总结标题出现后、回合仍在跑时再发一条（steer）→ 侧栏标题保持总结标题，不退回首条消息的截断标题。
 - 首条消息发出后立即手动重命名 → 生成完成不覆盖手动标题。
 - 模型档案思考等级设为 high → 标题调用不携带 reasoning/thinking 参数（provider 默认）。
 - 停用模型或断网 → 截断标题保留、回合正常、日志仅 warning。

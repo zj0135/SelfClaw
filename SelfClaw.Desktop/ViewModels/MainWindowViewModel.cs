@@ -660,9 +660,12 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
     private void ApplyAdmittedConversation(ConversationRecord conversation, bool preferSelection)
     {
         _dispatcher?.VerifyAccess();
+        // composer 的会话快照可能早于库里的标题变化（自动总结、重命名），标题只能来自列表：
+        // 拿快照回填会让侧栏退回首条消息的截断标题。
+        var storedTitle = _allConversations.FirstOrDefault(item => item.Id == conversation.Id)?.Title ?? conversation.Title;
         // 老会话再发一条时带的是入库时的旧 updated_at，而侧栏排序与「归档」判定都读它：
         // 不在这里刷新，刚发过消息的会话会继续赖在归档里到下次重载列表为止。
-        var admitted = conversation with { UpdatedAtUtc = DateTimeOffset.UtcNow };
+        var admitted = conversation with { Title = storedTitle, UpdatedAtUtc = DateTimeOffset.UtcNow };
         _allConversations.RemoveAll(item => item.Id == admitted.Id);
         _allConversations.Insert(0, admitted);
         if (preferSelection)
@@ -685,6 +688,9 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
         if (SelectedConversation?.Id == targetConversation?.Id)
         {
+            // 同一个会话被重新读出来（标题自动总结、重命名）：选中记录必须跟着列表走，
+            // 否则下一次发送会拿旧快照把已经变过的标题写回去。
+            SetProperty(ref _selectedConversation, targetConversation, nameof(SelectedConversation));
             PublishShell(false);
             return;
         }

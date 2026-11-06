@@ -56,6 +56,22 @@ public sealed class MainWindowViewModelSubmissionTests
         published.Should().BeAfter(DateTimeOffset.UtcNow.AddMinutes(-5));
     }
 
+    // 自动总结标题在回合中途写库并重载列表，而 composer 的会话快照仍是首条消息的截断标题：
+    // 回合没结束时再发一条（steer）如果拿这份快照回填，侧栏就会退回「用户的第一句话」。
+    [Fact]
+    public async Task SubmitPromptAsync_keeps_a_title_that_changed_outside_the_composer_snapshot()
+    {
+        using var harness = await Harness.CreateAsync(CreateConversation(Guid.NewGuid(), DateTimeOffset.UtcNow));
+        await harness.ViewModel.RenameConversationAsync(harness.Conversation.Id, "Summarized title");
+
+        (await harness.ViewModel.SubmitPromptAsync("steer the running turn")).Accepted.Should().BeTrue();
+
+        harness.LastNavigationTitle().Should().Be("Summarized title",
+            "a second message must not resurrect the staleness of the composer's conversation snapshot");
+        harness.ViewModel.SelectedConversation!.Title.Should().Be("Summarized title",
+            "the selected conversation must follow the reloaded record, not the snapshot it was selected with");
+    }
+
     private static ConversationRecord CreateConversation(Guid id, DateTimeOffset updatedAtUtc)
         => new(
             id,
@@ -82,7 +98,7 @@ public sealed class MainWindowViewModelSubmissionTests
 
     private sealed class ControlledConversationRepository : IConversationRepository, IWorkspaceRootRepository
     {
-        private readonly ConversationRecord _conversation;
+        private ConversationRecord _conversation;
         private readonly TaskCompletionSource<IReadOnlyList<MessageRecord>> _messagesSource =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
         private readonly TaskCompletionSource<IReadOnlyList<ToolExecutionRecord>> _toolRunsSource =
@@ -108,7 +124,10 @@ public sealed class MainWindowViewModelSubmissionTests
             => Task.FromResult<ConversationRecord?>(_conversation.Id == conversationId ? _conversation : null);
 
         public Task<ConversationRecord> UpsertConversationAsync(ConversationRecord conversation, CancellationToken cancellationToken = default)
-            => Task.FromResult(conversation);
+        {
+            if (conversation.Id == _conversation.Id) _conversation = conversation;
+            return Task.FromResult(conversation);
+        }
 
         public Task DeleteConversationAsync(Guid conversationId, CancellationToken cancellationToken = default)
             => Task.CompletedTask;
@@ -264,15 +283,21 @@ public sealed class MainWindowViewModelSubmissionTests
         }
 
         public DateTimeOffset LastNavigationTimestamp()
+            => DateTimeOffset.Parse(LastNavigationItem().GetProperty("updatedAtUtc").GetString()!);
+
+        public string LastNavigationTitle() => LastNavigationItem().GetProperty("title").GetString()!;
+
+        private JsonElement LastNavigationItem()
         {
             // 补丁只有导航真的变了才带 conversations：倒着找最近一条真正装着导航数据的上报。
             for (var index = HostMessages.Count - 1; index >= 0; index--)
             {
                 using var payload = JsonDocument.Parse(HostMessages[index]);
                 if (!payload.RootElement.TryGetProperty("conversations", out var conversations)) continue;
-                var item = conversations.EnumerateArray()
-                    .Single(conversation => conversation.GetProperty("id").GetString() == Conversation.Id.ToString("D"));
-                return DateTimeOffset.Parse(item.GetProperty("updatedAtUtc").GetString()!);
+                foreach (var conversation in conversations.EnumerateArray())
+                {
+                    if (conversation.GetProperty("id").GetString() == Conversation.Id.ToString("D")) return conversation.Clone();
+                }
             }
 
             throw new InvalidOperationException("No published transcript payload carried navigation data.");
