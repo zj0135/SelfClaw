@@ -10,8 +10,8 @@ namespace SelfClaw.Desktop.Services.Network;
 /// Owns the "which network exit do SelfClaw's requests use" setting in desktop-settings.json. The service is
 /// also the single source Infrastructure reads from (per HTTP handler creation and per child process
 /// launch), so it keeps a cached snapshot that callers can read synchronously. An unreadable or invalid
-/// stored node falls back to the default - following the Windows proxy configuration, which is what the
-/// application did before this setting existed - rather than failing a request.
+/// stored node falls back to the default - connecting directly, the same exit as a fresh install - rather
+/// than failing a request.
 /// </summary>
 public sealed class NetworkProxySettingsService : INetworkProxySource
 {
@@ -41,7 +41,7 @@ public sealed class NetworkProxySettingsService : INetworkProxySource
 
     /// <summary>
     /// The cached settings. Before the first load this answers the default, so a request that races the
-    /// startup warm-up follows the system proxy instead of silently going direct.
+    /// startup warm-up connects directly instead of waiting for the settings file.
     /// </summary>
     public NetworkProxySettings Current => _settings;
 
@@ -133,7 +133,7 @@ public sealed class NetworkProxySettingsService : INetworkProxySource
             return new NetworkProxySettings();
         }
 
-        var mode = Enum.IsDefined(settings.Mode) ? settings.Mode : NetworkProxyMode.System;
+        var mode = Enum.IsDefined(settings.Mode) ? settings.Mode : NetworkProxyMode.Direct;
         var host = settings.Host?.Trim() ?? string.Empty;
         if (host.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
         {

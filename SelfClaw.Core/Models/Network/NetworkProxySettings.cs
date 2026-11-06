@@ -9,6 +9,6 @@ namespace SelfClaw.Core.Models;
 /// page saves while the user is still typing.
 /// </summary>
 public sealed record NetworkProxySettings(
-    NetworkProxyMode Mode = NetworkProxyMode.System,
+    NetworkProxyMode Mode = NetworkProxyMode.Direct,
     string Host = "",
     int Port = 0);

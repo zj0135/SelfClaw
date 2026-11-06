@@ -72,7 +72,7 @@ public sealed partial class App : System.Windows.Application
             // 晚一步深色用户就会看到标题栏先白一下。
             await _host.Services.GetRequiredService<AppearanceSettingsService>().GetAsync();
             // 代理设置必须在第一个回合之前加载：HTTP handler 与子进程启动都只读缓存快照，晚一步用户
-            // 保存过的自定义出口会被静默忽略（回落到跟随系统代理）。
+            // 保存过的自定义出口会被静默忽略（回落到本地直连）。
             await _host.Services.GetRequiredService<NetworkProxySettingsService>().GetAsync();
             var mainWindow = _host.Services.GetRequiredService<MainWindow>();
             RegisterToastNotifications();

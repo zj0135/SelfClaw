@@ -202,7 +202,7 @@ public sealed class AiProviderHttpClientProviderTests
     {
         // Without the exit in the fingerprint a mode change would keep reusing the old handler and the
         // setting would look like it did nothing.
-        var source = new MutableNetworkProxySource();
+        var source = new MutableNetworkProxySource { Settings = new NetworkProxySettings(NetworkProxyMode.System) };
         using var provider = new AiProviderHttpClientProvider(source);
         var connection = CreateConnection(new Uri("https://api.example.test/v1/"), "{}");
 

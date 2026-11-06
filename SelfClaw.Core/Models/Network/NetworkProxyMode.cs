@@ -1,18 +1,17 @@
 namespace SelfClaw.Core.Models;
 
 /// <summary>
-/// Which network exit SelfClaw's own requests use. <see cref="System"/> is deliberately the zero value:
-/// it is what the application did before this setting existed (the .NET default handler follows the
-/// Windows proxy configuration), so a missing or hand-edited-unreadable node keeps today's behaviour
-/// instead of silently going direct.
+/// Which network exit SelfClaw's own requests use. <see cref="Direct"/> is deliberately the zero value:
+/// a fresh install, a missing settings node and a hand-edited-unreadable node all connect directly, so the
+/// application never silently inherits whatever proxy the machine happens to have configured.
 /// </summary>
 public enum NetworkProxyMode
 {
-    /// <summary>Follow the Windows proxy configuration (the behaviour before this setting existed).</summary>
-    System = 0,
-
     /// <summary>Connect directly, ignoring the system proxy and any inherited proxy variables.</summary>
-    Direct = 1,
+    Direct = 0,
+
+    /// <summary>Follow the Windows proxy configuration.</summary>
+    System = 1,
 
     /// <summary>Use <see cref="NetworkProxySettings.Host"/> and <see cref="NetworkProxySettings.Port"/>.</summary>
     Custom = 2,

@@ -62,7 +62,7 @@ public sealed class NetworkProxySettingsBridgeTests : IDisposable
     }
 
     [Fact]
-    public async Task An_unparsable_mode_is_normalized_to_the_system_exit_instead_of_failing()
+    public async Task An_unparsable_mode_is_normalized_to_the_default_exit_instead_of_failing()
     {
         var bridge = CreateBridge(out _);
         using var document = JsonDocument.Parse("""{ "mode": "NoSuchMode", "host": "127.0.0.1", "port": 7890 }""");
@@ -71,7 +71,7 @@ public sealed class NetworkProxySettingsBridgeTests : IDisposable
 
         var responseJson = Serialize(response!.Value.Response);
         responseJson.TryGetProperty("error", out _).Should().BeFalse();
-        responseJson.GetProperty("mode").GetString().Should().Be("System");
+        responseJson.GetProperty("mode").GetString().Should().Be("Direct");
     }
 
     [Fact]
@@ -88,7 +88,7 @@ public sealed class NetworkProxySettingsBridgeTests : IDisposable
         => WpfDispatcherTest.RunAsync(async () =>
         {
             var bridge = CreateBridge(out _);
-            using var document = JsonDocument.Parse("""{ "requestId": "save-2", "mode": "Direct" }""");
+            using var document = JsonDocument.Parse("""{ "requestId": "save-2", "mode": "System" }""");
 
             await bridge.TryHandleAsync("network-proxy/save", document.RootElement);
             // 推送经 InvokeAsync 排在 Dispatcher 队列上，让队列先跑完再断言。
@@ -98,7 +98,7 @@ public sealed class NetworkProxySettingsBridgeTests : IDisposable
             var push = JsonDocument.Parse(_posted[0]).RootElement;
             push.GetProperty("type").GetString().Should().Be("network-proxy/state");
             push.TryGetProperty("requestId", out _).Should().BeFalse();
-            push.GetProperty("mode").GetString().Should().Be("Direct");
+            push.GetProperty("mode").GetString().Should().Be("System");
         });
 
     [Fact]

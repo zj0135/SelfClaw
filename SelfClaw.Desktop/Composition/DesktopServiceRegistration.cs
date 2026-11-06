@@ -160,7 +160,7 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<WorkspaceToolsSettingsBridge>();
         services.AddSingleton<NetworkProxySettingsService>();
         services.AddSingleton<NetworkProxySettingsBridge>();
-        // 同上：覆盖 Infrastructure 注册的默认出口（跟随 Windows 系统代理）。
+        // 同上：覆盖 Infrastructure 注册的默认出口（本地直连）。
         services.AddSingleton<INetworkProxySource>(services =>
             services.GetRequiredService<NetworkProxySettingsService>());
         // 同上：覆盖 Infrastructure 注册的默认 shell 偏好源（Windows PowerShell）。

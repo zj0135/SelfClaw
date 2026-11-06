@@ -33,7 +33,9 @@ public sealed class NetworkProxyEnvironmentTests
     [Fact]
     public void System_injects_the_address_the_windows_settings_point_at()
     {
-        var entries = NetworkProxyEnvironment.Entries(new NetworkProxySettings(), () => "127.0.0.1:7890");
+        var entries = NetworkProxyEnvironment.Entries(
+            new NetworkProxySettings(NetworkProxyMode.System),
+            () => "127.0.0.1:7890");
 
         entries.Should().HaveCount(3);
         entries.Values.Should().OnlyContain(value => value == "http://127.0.0.1:7890");
@@ -43,7 +45,8 @@ public sealed class NetworkProxyEnvironmentTests
     public void System_without_a_static_address_injects_nothing()
     {
         // A PAC-only configuration has no host:port to hand over, so the child keeps its own exit.
-        NetworkProxyEnvironment.Entries(new NetworkProxySettings(), () => null).Should().BeEmpty();
+        NetworkProxyEnvironment.Entries(new NetworkProxySettings(NetworkProxyMode.System), () => null)
+            .Should().BeEmpty();
     }
 
     [Theory]

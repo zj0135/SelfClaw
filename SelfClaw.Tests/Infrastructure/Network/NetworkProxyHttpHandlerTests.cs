@@ -29,7 +29,7 @@ public sealed class NetworkProxyHttpHandlerTests
     [Fact]
     public void System_leaves_the_exit_to_dotnet()
     {
-        using var handler = Create(new NetworkProxySettings());
+        using var handler = Create(new NetworkProxySettings(NetworkProxyMode.System));
 
         handler.UseProxy.Should().BeTrue();
         handler.Proxy.Should().BeNull();

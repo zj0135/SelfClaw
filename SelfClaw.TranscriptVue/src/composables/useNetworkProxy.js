@@ -17,7 +17,7 @@ export const PROXY_MODES = [
 	{ id: 'Custom', label: '自定义', hint: '指定代理地址与端口' },
 ];
 
-const DEFAULT_MODE = 'System';
+const DEFAULT_MODE = 'Direct';
 const MIN_PORT = 1;
 const MAX_PORT = 65535;
 

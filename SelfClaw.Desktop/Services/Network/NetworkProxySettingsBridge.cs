@@ -134,7 +134,7 @@ internal sealed class NetworkProxySettingsBridge : IDisposable
     private static NetworkProxyMode ReadMode(JsonElement payload)
         => Enum.TryParse<NetworkProxyMode>(ReadOptionalString(payload, "mode"), ignoreCase: false, out var mode)
             ? mode
-            : NetworkProxyMode.System;
+            : NetworkProxyMode.Direct;
 
     private static int ReadPort(JsonElement payload)
         => payload.TryGetProperty("port", out var element) &&

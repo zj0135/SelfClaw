@@ -4,9 +4,9 @@ using SelfClaw.Core.Models;
 namespace SelfClaw.Infrastructure.Network;
 
 /// <summary>
-/// Default source used until a host supplies its settings-backed one: every request keeps following the
-/// Windows proxy configuration, exactly as it did before the setting existed. Public because the desktop
-/// host also launches child processes of its own (the CLI probe) and has to fall back the same way.
+/// Default source used until a host supplies its settings-backed one: every request connects directly, the
+/// same exit as a fresh install. Public because the desktop host also launches child processes of its own
+/// (the CLI probe) and has to fall back the same way.
 /// </summary>
 public sealed class DefaultNetworkProxySource : INetworkProxySource
 {

@@ -13,13 +13,13 @@ public sealed class NetworkProxySettingsServiceTests : IDisposable
     private string SettingsPath => Path.Combine(_root, "desktop-settings.json");
 
     [Fact]
-    public async Task Missing_node_follows_the_system_proxy()
+    public async Task Missing_node_connects_directly()
     {
         var service = CreateService();
 
         var settings = await service.GetAsync();
 
-        settings.Mode.Should().Be(NetworkProxyMode.System);
+        settings.Mode.Should().Be(NetworkProxyMode.Direct);
         settings.Should().Be(new NetworkProxySettings());
         service.Current.Should().Be(settings);
     }
@@ -29,7 +29,7 @@ public sealed class NetworkProxySettingsServiceTests : IDisposable
     {
         var service = CreateService();
 
-        // A request racing the startup warm-up must follow the system proxy, never silently go direct.
+        // A request racing the startup warm-up must use the same exit a missing node resolves to.
         service.Current.Should().Be(new NetworkProxySettings());
     }
 
@@ -49,14 +49,14 @@ public sealed class NetworkProxySettingsServiceTests : IDisposable
     public async Task Saving_the_same_settings_neither_writes_nor_notifies()
     {
         var service = CreateService();
-        await service.SaveAsync(new NetworkProxySettings(NetworkProxyMode.Direct));
+        await service.SaveAsync(new NetworkProxySettings(NetworkProxyMode.System));
         var notified = 0;
         service.Changed += _ => notified++;
         File.Delete(SettingsPath);
 
-        var saved = await service.SaveAsync(new NetworkProxySettings(NetworkProxyMode.Direct));
+        var saved = await service.SaveAsync(new NetworkProxySettings(NetworkProxyMode.System));
 
-        saved.Mode.Should().Be(NetworkProxyMode.Direct);
+        saved.Mode.Should().Be(NetworkProxyMode.System);
         File.Exists(SettingsPath).Should().BeFalse();
         notified.Should().Be(0);
     }
@@ -77,12 +77,12 @@ public sealed class NetworkProxySettingsServiceTests : IDisposable
     [InlineData("""{ "network_proxy": { "mode": 47 } }""")]
     [InlineData("""{ "network_proxy": { "mode": "NoSuchMode" } }""")]
     [InlineData("""{ "network_proxy": { "host": "127.0.0.1", "port": 7890 } }""")]
-    public async Task An_unusable_mode_falls_back_to_the_system_exit(string json)
+    public async Task An_unusable_mode_falls_back_to_the_default_exit(string json)
     {
         Directory.CreateDirectory(_root);
         await File.WriteAllTextAsync(SettingsPath, json);
 
-        (await CreateService().GetAsync()).Mode.Should().Be(NetworkProxyMode.System);
+        (await CreateService().GetAsync()).Mode.Should().Be(NetworkProxyMode.Direct);
     }
 
     [Fact]
