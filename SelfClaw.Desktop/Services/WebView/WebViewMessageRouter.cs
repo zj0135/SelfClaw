@@ -55,6 +55,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly AutomationBridge? _automationBridge;
     private readonly AttachmentBridge? _attachmentBridge;
     private readonly UsageStatisticsBridge? _usageStatisticsBridge;
+    private bool _isImagePreviewOpen;
     private int _disposeStarted;
     private readonly ILogger<WebViewMessageRouter> _logger;
     private readonly object _lifecycleGate = new();
@@ -114,6 +115,8 @@ internal sealed class WebViewMessageRouter : IDisposable
         _logger = logger ?? NullLogger<WebViewMessageRouter>.Instance;
 
     }
+    internal bool IsImagePreviewOpen => _isImagePreviewOpen;
+    internal void ResetImagePreview() => _isImagePreviewOpen = false;
 
     public async Task<WebViewHostCommand?> RouteAsync(
         string messageJson,
@@ -457,6 +460,12 @@ internal sealed class WebViewMessageRouter : IDisposable
                 return new WebViewHostCommand(WebViewHostCommandKind.MinimizeToTray);
             case "toggle-terminal":
                 return new WebViewHostCommand(WebViewHostCommandKind.ToggleTerminal);
+            case "image-preview/open":
+                _isImagePreviewOpen = true;
+                return null;
+            case "image-preview/close":
+                _isImagePreviewOpen = false;
+                return null;
             default:
                 if (ReadOptionalString(payload, "requestId") is null) return null;
                 throw new ArgumentException($"Unsupported message '{type}'.");

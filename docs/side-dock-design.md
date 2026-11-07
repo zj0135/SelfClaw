@@ -57,7 +57,7 @@ store API：`open()` / `close()` / `toggle()` / `toggleTool(id)`（快捷栏：�
 - **切 tab 不碰宿主**：终端开着时切到子代理，隐藏的 xterm 继续接收 `terminal-output`（`v-show` 复显时 ResizeObserver 触发 `fit`）。只有收起 dock 或关掉命令行 tab 才 `terminal-close`——宿主语义与原底部抽屉一致：会话保留、暂停 flush。
 - 关掉命令行 tab 不卸载 xterm（pane 仍挂载、仅隐藏）：再打开时 T1 让宿主恢复输出，滚动缓冲还在。
 - `useChatTerminal` 对 `terminal-state` 的订阅带 `replayLast: true`：宿主只在 WebView 导航完成时 `PublishState`，ChatView / SideDock 重挂载（从设置页返回、WebView 重载）靠 hostBridge 的粘性重放拿回最近开合状态。
-- Escape 仍由 `MainWindow.HandlePreviewKeyDown` 先交给终端（`terminal-focus-change` 语义不变）。
+- Escape 由 `MainWindow.HandlePreviewKeyDown` 统一裁决，优先级 **图片预览浮层 → 终端 → 中断回合**。宿主先于网页拿到按键（网页里的浮层永远等不到那一下），所以浮层开合由前端回写：`image-preview/open` / `image-preview/close` 落到 `WebViewMessageRouter.IsImagePreviewOpen`。浮层开着时宿主只推 `image-preview/dismiss` 让前端关掉它，既不写终端也不 `StopSelectedConversation`；`terminal-focus-change` 语义不变。WebView 导航即整页重载，`OnTranscriptNavigationStarting` 顺手清掉该状态，避免 Escape 之后永远只推 dismiss。
 
 ## 5. 子代理 pane
 

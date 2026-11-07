@@ -12,11 +12,17 @@ import AutomationView from './views/AutomationView.vue';
 import { useHostBridge } from './composables/hostBridge.js';
 import { useTranscriptBridge } from './composables/transcriptBridge.js';
 import { useConversationNavigation } from './composables/useConversationNavigation.js';
+import { useImagePreview } from './composables/useImagePreview.js';
 import { useSideDock } from './composables/useSideDock.js';
 
 const { on, post } = useHostBridge();
 const transcript = useTranscriptBridge();
 const dock = useSideDock();
+const {
+	preview: imagePreview,
+	open: openImagePreview,
+	close: closeImagePreview,
+} = useImagePreview();
 
 const viewRegistry = {
 	chat: markRaw(ChatView),
@@ -29,7 +35,6 @@ const viewRegistry = {
 const currentViewId = ref('chat');
 const activeViewComponent = computed(() => viewRegistry[currentViewId.value] || ChatView);
 const chatViewRef = ref(null);
-const imagePreview = ref(null);
 const SIDEBAR_COLLAPSE_KEY = 'selfclaw:sidebar-collapsed';
 const sidebarCollapsed = ref(readSidebarCollapsed());
 
@@ -115,28 +120,12 @@ function handleDocumentClick(event) {
 	post({ type: 'open-link', href });
 }
 
-function onDocumentKeydown(event) {
-	if (event.key === 'Escape' && imagePreview.value) {
-		closeImagePreview();
-	}
-}
-
-function openImagePreview(preview) {
-	imagePreview.value = preview;
-}
-
-function closeImagePreview() {
-	imagePreview.value = null;
-}
-
 onMounted(() => {
 	document.addEventListener('click', handleDocumentClick);
-	document.addEventListener('keydown', onDocumentKeydown);
 });
 
 onUnmounted(() => {
 	document.removeEventListener('click', handleDocumentClick);
-	document.removeEventListener('keydown', onDocumentKeydown);
 });
 </script>
 

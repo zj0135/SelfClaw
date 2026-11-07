@@ -213,22 +213,35 @@ public sealed partial class MainWindow : Window
     }
 
     private void OnTranscriptNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
-        => _webViewHostChannel.MarkNotReady();
+    {
+        _webViewHostChannel.MarkNotReady();
+        _webViewMessageRouter.ResetImagePreview();
+    }
 
     private async void HandlePreviewKeyDown(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.Escape)
+        if (e.Key != Key.Escape)
         {
-            e.Handled = true;
-            if (await _terminalHostController.TryWriteEscapeAsync())
-            {
-                FocusTranscriptView();
-                e.Handled = true;
-                return;
-            }
-
-            _viewModel.StopSelectedConversation();
+            return;
         }
+
+        e.Handled = true;
+
+        // 图片预览浮层开着时 Escape 归浮层：宿主关不掉网页里的浮层，只能推一条 dismiss，
+        // 同时保证既不写终端也不中断正在进行的回合。
+        if (_webViewMessageRouter.IsImagePreviewOpen)
+        {
+            _webViewHostChannel.PostPush(new { type = "image-preview/dismiss" });
+            return;
+        }
+
+        if (await _terminalHostController.TryWriteEscapeAsync())
+        {
+            FocusTranscriptView();
+            return;
+        }
+
+        _viewModel.StopSelectedConversation();
     }
 
     private void OnFallbackCloseButtonClick(object sender, RoutedEventArgs e)

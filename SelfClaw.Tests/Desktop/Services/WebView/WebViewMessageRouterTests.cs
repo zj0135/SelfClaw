@@ -96,6 +96,24 @@ public sealed class WebViewMessageRouterTests
         response.RootElement.GetProperty("error").GetString().Should().Contain("工作目录");
     }
 
+    // Escape 在窗口层就被 MainWindow.PreviewKeyDown 接走，网页永远等不到那次按键，所以浮层的
+    // 开合只能由前端推上来；宿主据此把 Escape 判给浮层而不是终端 / 回合中断。这两条消息是
+    // 纯状态回写，不该产生任何回包。
+    [Fact]
+    public async Task RouteAsync_tracks_image_preview_visibility_for_the_window()
+    {
+        using var context = new RouterTestContext();
+        context.Router.IsImagePreviewOpen.Should().BeFalse();
+
+        (await context.RouteAsync("""{"type":"image-preview/open"}""")).Should().BeNull();
+        context.Router.IsImagePreviewOpen.Should().BeTrue();
+
+        (await context.RouteAsync("""{"type":"image-preview/close"}""")).Should().BeNull();
+        context.Router.IsImagePreviewOpen.Should().BeFalse();
+
+        context.PostedJson.Should().BeEmpty();
+    }
+
     private const string ApplicationOrigin = "https://appassets.selfclaw.local/TranscriptVue/index.html";
     private const string ForeignOrigin = "https://foreign.example/index.html";
 
