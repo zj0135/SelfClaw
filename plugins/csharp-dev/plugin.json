@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "csharp-dev",
+  "name": "C# 开发（编码 + 测试编写）",
+  "version": "1.1.0",
+  "description": "面向 ASP.NET Core 后端 + WPF 客户端的日常开发技能包：C# 语言、Web API、EF Core、测试执行与脚手架（xUnit 生态）。",
+  "publisher": "hm",
+  "contributes": {
+    "directInstructions": "instructions/direct.md",
+    "skills": [
+      { "id": "csharp-expert", "path": "skills/csharp-expert" },
+      { "id": "csharp-refactoring", "path": "skills/csharp-refactoring" },
+      { "id": "dotnet-webapi", "path": "skills/dotnet-webapi" },
+      { "id": "optimizing-ef-core-queries", "path": "skills/optimizing-ef-core-queries" },
+      { "id": "run-tests", "path": "skills/run-tests" },
+      { "id": "scaffold-dotnet-test-project", "path": "skills/scaffold-dotnet-test-project" },
+      { "id": "analyzing-dotnet-performance", "path": "skills/analyzing-dotnet-performance" }
+    ]
+  }
+}

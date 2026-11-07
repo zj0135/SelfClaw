@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "csharp-diag",
+  "name": "C# 调试、性能优化与测试质量",
+  "version": "1.1.0",
+  "description": "诊断与优化技能包：构建失败与性能诊断、性能反模式扫描、dump 分析、BenchmarkDotNet 基准、覆盖率与测试反模式审计。",
+  "publisher": "hm",
+  "contributes": {
+    "directInstructions": "instructions/direct.md",
+    "skills": [
+      { "id": "binlog-failure-analysis", "path": "skills/binlog-failure-analysis" },
+      { "id": "build-perf-diagnostics", "path": "skills/build-perf-diagnostics" },
+      { "id": "analyzing-dotnet-performance", "path": "skills/analyzing-dotnet-performance" },
+      { "id": "dump-collect", "path": "skills/dump-collect" },
+      { "id": "microbenchmarking", "path": "skills/microbenchmarking" },
+      { "id": "coverage-analysis", "path": "skills/coverage-analysis" },
+      { "id": "test-anti-patterns", "path": "skills/test-anti-patterns" }
+    ]
+  }
+}
