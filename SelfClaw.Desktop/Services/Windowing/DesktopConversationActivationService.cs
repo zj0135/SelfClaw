@@ -85,5 +85,6 @@ internal sealed class DesktopConversationActivationService
         if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
         window.Activate();
         window.Focus();
+        WindowActivation.BringToFront(window);
     }
 }

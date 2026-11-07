@@ -14,6 +14,7 @@ using SelfClaw.Desktop.Services.Notifications;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.Questions;
 using SelfClaw.Desktop.Services.Runtime;
+using SelfClaw.Desktop.Services.SingleInstance;
 using SelfClaw.Desktop.Services.SystemTray;
 using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.Tools;
@@ -30,7 +31,12 @@ namespace SelfClaw.Desktop;
 
 public sealed partial class App : System.Windows.Application
 {
+    // 关闭流程最长等到 20 秒；这段时间里锁还握在退出的那个进程手里。后启动的进程在这儿
+    // 等一下再自己接管，好过让这次双击什么都看不到。
+    private static readonly TimeSpan PrimaryExitGrace = TimeSpan.FromSeconds(2);
+
     private IHost? _host;
+    private DesktopSingleInstanceGuard? _singleInstance;
     private StoragePaths? _storagePaths;
     private int _isShowingUnhandledExceptionDialog;
     private bool _toastActivationRegistered;
@@ -43,7 +49,49 @@ public sealed partial class App : System.Windows.Application
     {
         base.OnStartup(e);
         ShutdownMode = ShutdownMode.OnExplicitShutdown;
+
+        _singleInstance = new DesktopSingleInstanceGuard(Dispatcher);
+        if (!_singleInstance.TryAcquire(TimeSpan.Zero) && !TryBecomePrimaryAfterSignal())
+        {
+            // 已经有主进程了：它那边的窗口正被叫出来，本进程不碰数据库、不建宿主，直接退出。
+            _singleInstance.Dispose();
+            _singleInstance = null;
+            Shutdown();
+            return;
+        }
+
+        _singleInstance.StartListening();
         _startupTask = StartAsync();
+    }
+
+    // 「有人又双击了桌面图标」的那一侧：先请现有实例把窗口亮出来；它要是在退出途中（关窗口到
+    // 彻底退出有整段拆卸预算），锁很快就会放开，那就自己接管，绝不白点一次。
+    private bool TryBecomePrimaryAfterSignal()
+    {
+        _singleInstance?.SignalPrimaryInstance();
+        return _singleInstance?.TryAcquire(PrimaryExitGrace) ?? false;
+    }
+
+    private void RegisterSingleInstanceActivation()
+        => _singleInstance?.SetActivationHandler(() => _ = ActivateFromSecondInstanceAsync());
+
+    // 第二实例已经在退出，这里只负责把主窗口叫到前面（隐藏到托盘、最小化、被别的窗口压住都要复原）。
+    private async Task ActivateFromSecondInstanceAsync()
+    {
+        if (_host is null || _shutdownTask is not null)
+        {
+            return;
+        }
+
+        try
+        {
+            await _host.Services.GetRequiredService<DesktopConversationActivationService>().ActivateAsync();
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception exception)
+        {
+            Log.Warning(exception, "Failed to activate the main window for a second launch.");
+        }
     }
 
     private async Task StartAsync()
@@ -87,6 +135,7 @@ public sealed partial class App : System.Windows.Application
             MainWindow = mainWindow;
             mainWindow.Closing += OnMainWindowClosing;
             mainWindow.Show();
+            RegisterSingleInstanceActivation();
             await mainWindow.InitializeAsync();
 
             // 主窗口已被显式设为 Application.MainWindow,此后再显示 PetWindow 不会篡夺 MainWindow(见 §7.2)。
@@ -191,6 +240,9 @@ public sealed partial class App : System.Windows.Application
             try { _emergencyCleanup?.Invoke(); }
             catch (Exception exception) { Log.Error(exception, "Synchronous desktop cleanup failed."); }
         }
+        // 单例锁留到最后一刻：拆卸期间第二次双击应当被引导到这里，而不是拉起第二套宿主。
+        _singleInstance?.Dispose();
+        _singleInstance = null;
         Log.CloseAndFlush();
         base.OnExit(e);
     }
