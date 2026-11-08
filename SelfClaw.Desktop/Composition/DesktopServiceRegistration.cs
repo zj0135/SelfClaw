@@ -24,6 +24,7 @@ using SelfClaw.Desktop.Services.Attachments.Abstractions;
 using SelfClaw.Desktop.Services.Compression;
 using SelfClaw.Desktop.Services.Extensions;
 using SelfClaw.Desktop.Services.Git;
+using SelfClaw.Desktop.Services.ImageGeneration;
 using SelfClaw.Desktop.Services.Network;
 using SelfClaw.Desktop.Services.ProgrammingAssistant;
 using SelfClaw.Desktop.Services.ProgrammingAssistant.Models;
@@ -204,6 +205,7 @@ internal static class DesktopServiceRegistration
         services.AddSingleton<WorkspaceSelectionBridge>();
         services.AddSingleton<GitWorkspaceBridge>();
         services.AddSingleton<GitDiffBridge>();
+        services.AddSingleton<ImageGenerationBridge>();
         services.AddSingleton<IActivityPanelScopeSource>(services => services.GetRequiredService<MainWindowViewModel>());
         services.AddSingleton(services => new ActivityPanelBridge(
             services.GetRequiredService<ActivityPanelPublisher>(),
@@ -234,6 +236,7 @@ internal static class DesktopServiceRegistration
             services.GetRequiredService<AutomationBridge>(),
             services.GetRequiredService<AttachmentBridge>(),
             services.GetRequiredService<UsageStatisticsBridge>(),
+            services.GetRequiredService<ImageGenerationBridge>(),
             services.GetRequiredService<ILogger<WebViewMessageRouter>>()));
         services.AddSingleton(services => new MainWindow(
             services.GetRequiredService<MainWindowViewModel>(),

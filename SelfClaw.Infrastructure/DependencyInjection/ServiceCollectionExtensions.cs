@@ -41,6 +41,7 @@ using SelfClaw.Infrastructure.Agents.Subagents.Persistence;
 using SelfClaw.Infrastructure.Agents.Subagents.Runtime;
 using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Infrastructure.Automation;
+using SelfClaw.Infrastructure.ImageGeneration;
 
 namespace SelfClaw.Infrastructure;
 
@@ -224,6 +225,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAiProviderSettingsService>(provider => provider.GetRequiredService<AiProviderSettingsService>());
         services.AddSingleton<IAiModelCatalog>(provider => provider.GetRequiredService<AiProviderSettingsService>());
         services.AddSingleton<IAiChatClientFactory, AiChatClientFactory>();
+        services.AddSingleton<IImageGenerationService>(serviceProvider =>
+            new ImageGenerationService(
+                serviceProvider.GetRequiredService<IAiProviderRepository>(),
+                serviceProvider.GetRequiredService<AiProviderRegistry>(),
+                serviceProvider.GetRequiredService<ISecretProtector>(),
+                serviceProvider.GetRequiredService<AiProviderHttpClientProvider>(),
+                serviceProvider.GetService<ILogger<ImageGenerationService>>()));
         services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<WorkspaceFileService>();
         services.AddSingleton<WorkspaceSearchService>();

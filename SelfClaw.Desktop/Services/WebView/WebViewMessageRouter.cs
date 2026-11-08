@@ -24,6 +24,7 @@ using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.Transcript;
 using SelfClaw.Desktop.Services.Usage;
 using SelfClaw.Desktop.Services.Workspace;
+using SelfClaw.Desktop.Services.ImageGeneration;
 using SelfClaw.Desktop.ViewModels;
 
 namespace SelfClaw.Desktop.Services.WebView;
@@ -55,6 +56,7 @@ internal sealed class WebViewMessageRouter : IDisposable
     private readonly AutomationBridge? _automationBridge;
     private readonly AttachmentBridge? _attachmentBridge;
     private readonly UsageStatisticsBridge? _usageStatisticsBridge;
+    private readonly ImageGenerationBridge? _imageGenerationBridge;
     private bool _isImagePreviewOpen;
     private int _disposeStarted;
     private readonly ILogger<WebViewMessageRouter> _logger;
@@ -87,6 +89,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         AutomationBridge? automationBridge = null,
         AttachmentBridge? attachmentBridge = null,
         UsageStatisticsBridge? usageStatisticsBridge = null,
+        ImageGenerationBridge? imageGenerationBridge = null,
         ILogger<WebViewMessageRouter>? logger = null)
     {
         _aiProviderSettingsBridge = aiProviderSettingsBridge;
@@ -112,6 +115,7 @@ internal sealed class WebViewMessageRouter : IDisposable
         _automationBridge = automationBridge;
         _attachmentBridge = attachmentBridge;
         _usageStatisticsBridge = usageStatisticsBridge;
+        _imageGenerationBridge = imageGenerationBridge;
         _logger = logger ?? NullLogger<WebViewMessageRouter>.Instance;
 
     }
@@ -329,6 +333,12 @@ internal sealed class WebViewMessageRouter : IDisposable
             case var name when name.StartsWith("attachments/", StringComparison.Ordinal) && _attachmentBridge is not null:
                 await _attachmentBridge.HandleAsync(type, payload, ownerHandle, cancellationToken);
                 return null;
+            case var name when name.StartsWith("image-generation/", StringComparison.Ordinal):
+                {
+                    if (_imageGenerationBridge is null) throw new ArgumentException("Unsupported image generation message.");
+                    response = await _imageGenerationBridge.TryHandleAsync(type, payload, cancellationToken);
+                    break;
+                }
             case var name when name.StartsWith("usage/", StringComparison.Ordinal):
                 {
                     if (_usageStatisticsBridge is null) throw new ArgumentException("Unsupported usage message.");

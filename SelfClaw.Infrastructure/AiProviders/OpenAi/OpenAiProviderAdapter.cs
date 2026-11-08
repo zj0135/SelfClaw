@@ -66,7 +66,9 @@ internal sealed partial class OpenAiProviderAdapter : IAiProviderAdapter
     public AiProviderKind ProviderKind => _providerKind;
 
     public bool SupportsApiFormat(AiProviderApiFormat apiFormat) =>
-        apiFormat is AiProviderApiFormat.OpenAIChatCompletions or AiProviderApiFormat.OpenAIResponses;
+        apiFormat is AiProviderApiFormat.OpenAIChatCompletions
+            or AiProviderApiFormat.OpenAIResponses
+            or AiProviderApiFormat.OpenAIImages;
 
     public bool SupportsModelListing => true;
 
