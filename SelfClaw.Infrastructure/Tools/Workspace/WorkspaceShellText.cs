@@ -8,6 +8,11 @@ namespace SelfClaw.Infrastructure.Tools.Workspace;
 /// </summary>
 internal static class WorkspaceShellText
 {
+    // Says out loud what the tool cannot do: a dev server started with `&`, nohup or start /b would only
+    // block the call until its timeout and then die with it, and the user gets no handle on it either way.
+    private const string BackgroundNote =
+        " The call waits for the command to finish, so it cannot keep a service running in the background.";
+
     internal static string Name(WorkspaceShellKind kind) => kind switch
     {
         WorkspaceShellKind.WindowsPowerShell => "PowerShell",
@@ -17,7 +22,9 @@ internal static class WorkspaceShellText
         _ => "shell",
     };
 
-    internal static string ToolDescription(WorkspaceShellKind kind) => kind switch
+    internal static string ToolDescription(WorkspaceShellKind kind) => Describe(kind) + BackgroundNote;
+
+    private static string Describe(WorkspaceShellKind kind) => kind switch
     {
         WorkspaceShellKind.WindowsPowerShell =>
             "Run a Windows PowerShell command with the current workspace as its working directory.",

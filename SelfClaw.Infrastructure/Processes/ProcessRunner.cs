@@ -47,12 +47,29 @@ internal static class ProcessRunner
             throw new InvalidOperationException($"Failed to start '{startInfo.FileName}'.");
         }
 
+        // Enrolled immediately after the start, before the first read, so the command cannot get far enough
+        // to spawn a service that would miss the job. A job that cannot be created (or a process that exits
+        // first) leaves the tree kill below as the only owner, which is the previous behaviour.
+        using var job = ProcessJob.TryCreate();
+        var ownsJob = job?.TryAssign(process) == true;
+        var completedNormally = false;
+
         using var drainCancellation = new CancellationTokenSource();
         var standardOutputTask = DrainAsync(process.StandardOutput, drainCancellation.Token);
         var standardErrorTask = DrainAsync(process.StandardError, drainCancellation.Token);
         var drains = Task.WhenAll(standardOutputTask, standardErrorTask);
 
-        using var registration = cancellationToken.Register(() => ProcessTree.TryKill(process));
+        using var registration = cancellationToken.Register(() =>
+        {
+            // The job dies first because it is the only handle on a service the command detached; the tree
+            // kill then covers a command whose descendants never entered the job.
+            if (ownsJob)
+            {
+                job!.Terminate();
+            }
+
+            ProcessTree.TryKill(process);
+        });
         try
         {
             await Task.WhenAll(process.WaitForExitAsync(cancellationToken), drains)
@@ -62,6 +79,7 @@ internal static class ProcessRunner
             cancellationToken.ThrowIfCancellationRequested();
             var standardOutput = await standardOutputTask.ConfigureAwait(false);
             var standardError = await standardErrorTask.ConfigureAwait(false);
+            completedNormally = true;
             return new ProcessRunResult(
                 process.ExitCode,
                 standardOutput.Text,
@@ -76,6 +94,20 @@ internal static class ProcessRunner
         }
         finally
         {
+            if (ownsJob)
+            {
+                // A command that finished on its own may have started something meant to outlive it
+                // (`start chrome`, `code .`); every other ending owns everything it started.
+                if (completedNormally)
+                {
+                    job!.Detach();
+                }
+                else
+                {
+                    job!.Terminate();
+                }
+            }
+
             ProcessTree.TryKill(process);
             // These readers use an internal shutdown token; caller cancellation still propagates
             // from the wait above, while inherited pipes get at most two seconds to close.

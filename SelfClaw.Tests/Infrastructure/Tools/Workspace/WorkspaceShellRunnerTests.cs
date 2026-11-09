@@ -50,6 +50,157 @@ public sealed class WorkspaceShellRunnerTests : IDisposable
         timer.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(8));
     }
 
+    [Fact]
+    public async Task Cancellation_kills_the_descendants_of_a_command_that_started_a_service()
+    {
+        // The leak shape that matters: a dev server is a chain (shell -> package manager -> server), so a
+        // cancel that stops at the shell would keep the service running. This starts the same two-level
+        // chain out of real processes and asserts the whole tree is gone, not only the shell.
+        var midPidFile = Path.Combine(_root, "mid.pid");
+        var leafPidFile = Path.Combine(_root, "leaf.pid");
+        File.WriteAllText(Path.Combine(_root, "mid.ps1"), $"""
+            $leaf = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-NonInteractive', '-Command', 'Start-Sleep -Seconds 300') -PassThru -NoNewWindow
+            $leaf.Id | Set-Content -LiteralPath '{leafPidFile}'
+            Start-Sleep -Seconds 300
+            """);
+        using var cancellation = new CancellationTokenSource();
+        var run = new WorkspaceShellRunner().RunShellCommandAsync(_root,
+            $"$mid = Start-Process -FilePath powershell.exe -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', '{Path.Combine(_root, "mid.ps1")}') -PassThru -NoNewWindow; " +
+            $"$mid.Id | Set-Content -LiteralPath '{midPidFile}'; Start-Sleep -Seconds 300",
+            300, cancellation.Token);
+        var midPid = await ReadPidAsync(midPidFile);
+        var leafPid = await ReadPidAsync(leafPidFile);
+
+        cancellation.Cancel();
+        try
+        {
+            Func<Task> running = () => run;
+            await running.Should().ThrowAsync<OperationCanceledException>();
+            await WaitUntilGoneAsync(midPid);
+            await WaitUntilGoneAsync(leafPid);
+        }
+        finally
+        {
+            KillIfAlive(midPid);
+            KillIfAlive(leafPid);
+        }
+    }
+
+    [Fact]
+    public async Task Cancellation_kills_a_service_the_command_detached_with_nohup_and_an_ampersand()
+    {
+        // The reported shape: `cd ui && (nohup npm run dev > log 2>&1 &) ; sleep 150; tail -40 log`. The
+        // subshell exits at once, so the service keeps running with no parent chain leading back to the
+        // shell that started it and no pipe holding the call open either. Only the job can reach it.
+        if (ShellExecutableLocator.TryFindGitBash() is null) return;
+        var pidFile = Path.Combine(_root, "detached.pid");
+        using var cancellation = new CancellationTokenSource();
+        var runner = new WorkspaceShellRunner(new StubShellPreferenceSource(WorkspaceShellKind.GitBash));
+        var run = runner.RunShellCommandAsync(_root,
+            $"{DetachedServiceCommand(pidFile, sleep: 300)} ; sleep 300", 300, cancellation.Token);
+        var detachedPid = await ReadPidAsync(pidFile);
+
+        cancellation.Cancel();
+        try
+        {
+            Func<Task> running = () => run;
+            await running.Should().ThrowAsync<OperationCanceledException>();
+            await WaitUntilGoneAsync(detachedPid);
+        }
+        finally
+        {
+            KillIfAlive(detachedPid);
+        }
+    }
+
+    [Fact]
+    public async Task A_command_that_finishes_normally_does_not_kill_what_it_started()
+    {
+        // `start chrome` / `code .` hand a window to the user and return; the call must not take it down.
+        if (ShellExecutableLocator.TryFindGitBash() is null) return;
+        var pidFile = Path.Combine(_root, "spawned.pid");
+        var runner = new WorkspaceShellRunner(new StubShellPreferenceSource(WorkspaceShellKind.GitBash));
+
+        var result = await runner.RunShellCommandAsync(_root,
+            $"{DetachedServiceCommand(pidFile, sleep: 300)} ; echo started", 60);
+        var spawnedPid = await ReadPidAsync(pidFile);
+        try
+        {
+            result.ExitCode.Should().Be(0);
+            await Task.Delay(TimeSpan.FromMilliseconds(500));
+            IsAlive(spawnedPid).Should().BeTrue($"process {spawnedPid} was started by a command that succeeded");
+        }
+        finally
+        {
+            KillIfAlive(spawnedPid);
+        }
+    }
+
+    /// <summary>
+    /// A Git Bash fragment that starts a service in a subshell and forgets about it, exactly like the reported
+    /// command. The service reports its own Windows PID, because bash's <c>$!</c> is an MSYS pid that does not
+    /// resolve through <see cref="Process.GetProcessById(int)"/>.
+    /// </summary>
+    private string DetachedServiceCommand(string pidFile, int sleep)
+    {
+        var script = Path.Combine(_root, $"{Path.GetFileNameWithoutExtension(pidFile)}.ps1");
+        File.WriteAllText(script, $"""
+            $PID | Set-Content -LiteralPath '{pidFile}'
+            Start-Sleep -Seconds {sleep}
+            """);
+        return $"( nohup powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File '{script}' " +
+            "> /dev/null 2>&1 & )";
+    }
+
+    private static async Task<int> ReadPidAsync(string path)
+    {
+        for (var attempt = 0; attempt < 200; attempt++)
+        {
+            if (File.Exists(path) && int.TryParse(File.ReadAllText(path).Trim(), out var pid) && pid > 0) return pid;
+            await Task.Delay(100);
+        }
+
+        throw new TimeoutException($"'{path}' was never written; the probe chain did not start.");
+    }
+
+    // The kill is issued from a cancellation callback, so the tree is torn down asynchronously.
+    private static async Task WaitUntilGoneAsync(int pid)
+    {
+        for (var attempt = 0; attempt < 100; attempt++)
+        {
+            if (!IsAlive(pid)) return;
+            await Task.Delay(100);
+        }
+
+        IsAlive(pid).Should().BeFalse($"process {pid} survived cancellation");
+    }
+
+    private static bool IsAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            return !process.HasExited;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    private static void KillIfAlive(int pid)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(pid);
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception exception) when (exception is ArgumentException or System.ComponentModel.Win32Exception
+            or InvalidOperationException)
+        {
+        }
+    }
+
     [Theory]
     [InlineData("Get-ChildItem \"$env:LOCALAPPDATA\\SelfClaw\\skills\\review\\scripts\"")]
     [InlineData("Get-ChildItem $env:LOCALAPPDATA/SelfClaw/skills/review")]
