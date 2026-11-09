@@ -81,6 +81,8 @@ Desktop 不再补齐默认模型。排队 child 与 continuation 使用捕获的
 
 `ProcessTree.TryKill` **永不抛异常**，且异常集合是白名单（`InvalidOperationException`（含派生的 `ObjectDisposedException`）/ `Win32Exception` / `NotSupportedException` / `AggregateException`）。`AggregateException` 必须在内：`Process.Kill(entireProcessTree: true)` 用「Not all processes in the associated process's descendant tree could be terminated」表达部分成功。漏掉它有两个连锁后果——取消回调抛出的异常会经 `CancellationTokenSource.Cancel()` 顶替掉 `OperationCanceledException`（`DirectToolInvoker` 于是把用户取消记成 `Failed` 工具结果，连续 3 次即 `DirectToolFaultLimitException`、回合判失败、队列被暂停），而 `ConversationRunHandle.Cancel()` 只吞 `ObjectDisposedException`，异常还会中断 `StopAsync`/`Dispose` 里「逐个取消 handle」的循环，让其它会话的回合逃过取消。不要改成 `catch (Exception)`（会藏住真正的 bug），也不要只在 `finally` 里依赖它——`ProcessRunner` 的 `finally` 顺序依赖它不抛。
 
+**Esc 的取消不能被数据库写挡住。** `ConversationInputService.StopAsync` 的 settle 顺序是不变量（先关 steer 入口、丢弃 backlog，再取消回合），但 settle 现在跑在 `Task.Run` 上、取消最多等 `SettleBudget`（1 秒）就继续。两个原因都必须保留：`Microsoft.Data.Sqlite` 的 `BEGIN IMMEDIATE` 是**同步**的、会等满 SQLite 的 30 秒 busy timeout（`PRAGMA busy_timeout` 会被每命令设置覆盖，只有 `DbConnection.DefaultTimeout` 有效），所以 settle 直接内联会让调用线程（Esc 时就是 UI 线程）冻住一两分钟；`Task.WhenAny` 又救不了同步前缀，必须由后台线程承载。落下的半个 settle 不会留下错误状态：steer 结算由回合终态事务里的 `SettleSteerIntakeAsync` 兜底，而没能提交的 settle 不会 `MarkUserInitiatedStop`，surviving backlog 因此保留 pause-on-cancel 保护（`PauseBeforeReleaseAsync`），不会被下一次扫描静默续跑。
+
 ## 4. Continuation 恢复与所有权
 
 `SubagentDeliveryDispatcher` 读取 ready mailbox 时排除运行或删除中的父会话。准入竞争或领取失败后继续尝试其他父会话；每批最多检查 32 个候选，失败父会话的跳过集合保留到扫描结束，避免超过一批的失败项持续挡住后续父会话。SQLite 保留父会话 lease 排他性与 mailbox 批次语义。

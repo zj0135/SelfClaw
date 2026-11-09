@@ -19,6 +19,13 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
 {
     private const int MaximumAttachmentsPerInput = 6;
 
+    /// <summary>
+    /// How long Esc may spend settling the queue before the run is cancelled regardless. The two writes it
+    /// covers normally finish in milliseconds; this only has to be far shorter than the SQLite busy timeout
+    /// that would otherwise dominate the user-visible stop latency.
+    /// </summary>
+    private static readonly TimeSpan SettleBudget = TimeSpan.FromSeconds(1);
+
     private readonly IConversationInputStore _store;
     private readonly IConversationInputSchedulerStore _scheduler;
     private readonly ConversationInputQueueService _queue;
@@ -95,6 +102,39 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
         // stranded behind a manual resume. With no live turn there is nothing to stop: Esc must not
         // pause or mutate an idle queue.
         if (_runs.GetActiveRun(conversationId) is not { } handle) return;
+        // The settle still starts first, but the cancel no longer waits for it to commit. It has to run off
+        // this thread: not only do both writes take the database's one write lock, Microsoft.Data.Sqlite's
+        // BEGIN IMMEDIATE is synchronous and waits out SQLite's 30 s busy timeout, so a busy database would
+        // block the calling thread (the UI thread, on Esc) for a minute or more before the first await and
+        // the tool process would keep running the whole time. The gap is covered on both sides: the terminal
+        // commit settles the steer intake on its own, and a settle that never committed leaves the stop
+        // unmarked, so the surviving backlog keeps the pause-on-cancel protection.
+        var settlement = Task.Run(() => SettleAsync(handle, conversationId), CancellationToken.None);
+        try
+        {
+            if (await Task.WhenAny(settlement, Task.Delay(SettleBudget)).ConfigureAwait(false) != settlement)
+            {
+                _logger.LogWarning(
+                    "The input queue of {ConversationId} is still settling after {SettleBudget}; cancelling the turn now.",
+                    conversationId,
+                    SettleBudget);
+            }
+        }
+        finally
+        {
+            _runs.Stop(conversationId);
+        }
+
+        await settlement.ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Applies the durable half of a stop. A failed settle is logged instead of thrown: the caller has already
+    /// decided to cancel, and a database error must surface as the documented paused-queue fallback rather
+    /// than replace the stop itself.
+    /// </summary>
+    private async Task SettleAsync(ConversationRunHandle handle, Guid conversationId)
+    {
         try
         {
             if (handle.InputSession is { } session)
@@ -104,13 +144,17 @@ internal sealed class ConversationInputService : IConversationInputCoordinator
 
             await _scheduler.DiscardQueuedAsync(conversationId, ConversationInputReason.TurnCancelled, CancellationToken.None).ConfigureAwait(false);
             _changes.Notify(conversationId);
-            // Only a durably cleared queue may skip the dispatcher's failure pause; if the discard threw,
-            // the run still ends below but the surviving backlog keeps the pause-on-cancel protection.
+            // Only a durably cleared queue may skip the dispatcher's failure pause; if a write above threw,
+            // the run still gets cancelled but the surviving backlog keeps the pause-on-cancel protection.
             handle.MarkUserInitiatedStop();
         }
-        finally
+        catch (OperationCanceledException)
         {
-            _runs.Stop(conversationId);
+            throw;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to settle the input queue for {ConversationId}.", conversationId);
         }
     }
 
