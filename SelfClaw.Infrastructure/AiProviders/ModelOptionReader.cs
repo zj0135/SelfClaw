@@ -87,18 +87,23 @@ internal sealed class ModelOptionReader
         return true;
     }
 
-    /// <summary>Emits a debug log for every option key the format does not recognise.</summary>
+    /// <summary>
+    /// Emits a debug log for every option key the format does not recognise. Host-owned keys are skipped:
+    /// they are never meant for the wire, so reporting them would bury the keys that are.
+    /// </summary>
     public void LogUnknown(IReadOnlySet<string> recognizedKeys)
     {
         foreach (var key in _options.Keys)
         {
-            if (!recognizedKeys.Contains(key))
+            if (recognizedKeys.Contains(key) || AiChatOptions.IsHostOwnedOption(key))
             {
-                _logger.LogDebug(
-                    "Ignoring unknown model option '{Key}' for profile '{Profile}'.",
-                    key,
-                    _profileName);
+                continue;
             }
+
+            _logger.LogDebug(
+                "Ignoring unknown model option '{Key}' for profile '{Profile}'.",
+                key,
+                _profileName);
         }
     }
 

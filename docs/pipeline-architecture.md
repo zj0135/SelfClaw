@@ -138,6 +138,7 @@ flowchart TB
 - provider pipeline **先于** capability lease 释放，避免 HTTP 流仍在消费时回收 MCP 连接。
 - 工具循环由每回合一个实例的 `DirectTurnRun` 驱动（最多 `DirectTurnRun.MaximumProviderRequestsPerTurn` = 1024 次 provider 请求），SDK 管线只挂 `UseLogging`；`DirectToolInvoker` 自持连续故障预算 `MaximumConsecutiveToolFaults = 2`，超预算抛 `DirectToolFaultLimitException` 终止回合。
 - `PrepareAsync` 与 `ResolveAsync` 之间有顺序依赖：能力解析使用已确定的具体模型 id，禁用或无效模型不会先触发 MCP 连接。
+- `ModelOptions` 是一个袋子装两类键，**只有第一类能上网**：线参数（`thinking.type` / `reasoning_effort` / `max_output_tokens` / `parallel_tool_calls` / `store` / `truncation` / `max_tokens` / `reasoning.effort`）由 adapter 翻成请求 patch；宿主自有的 `display.*`（模型列表刷新写入的名称/窗口/输出上限/价格，settings 与服务用量仪表盘在读）与 `context_window_tokens` / `tokenizer.encoding`（Direct 历史预算与计数）**永不上线**。`ModelOptionReader.LogUnknown` 因此跳过 `AiChatOptions.IsHostOwnedOption`，否则每个档案、每次 provider 请求都会各报三条「未知选项」，把真正拼错的线参数淹掉；新增 adapter 只需列出第一类即可，不需重复这个豁免。
 
 ## 3. CLI 分支：子进程 JSONL 全链路
 

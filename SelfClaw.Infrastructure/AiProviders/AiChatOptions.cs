@@ -38,6 +38,13 @@ internal static class AiChatOptions
     private const string CatalogMaxOutputTokensKey = "display.maxOutputTokens";
 
     /// <summary>
+    /// Prefix of the catalog metadata every provider's model list writes into a profile's options
+    /// (<c>display.name</c>, <c>display.contextLength</c>, the prices): it describes the model for the
+    /// settings UI and the usage dashboard and never travels on the wire.
+    /// </summary>
+    private const string DisplayMetadataPrefix = "display.";
+
+    /// <summary>
     /// Reads the profile's declared context window; null when unset. A mistyped value is treated as
     /// unset here because this reader runs before logging is bound to the turn's adapter.
     /// </summary>
@@ -85,6 +92,16 @@ internal static class AiChatOptions
             ? catalogMaximum
             : null;
     }
+
+    /// <summary>
+    /// Whether an option key belongs to this process rather than to a provider request: the catalog
+    /// metadata written by model-list refresh, plus the Direct history-budget and tokenizer keys. An
+    /// adapter that reported one of these as unrecognised would be calling its own bookkeeping a user
+    /// mistake — and, because the catalog keys ride on every profile, drowning the real signal.
+    /// </summary>
+    internal static bool IsHostOwnedOption(string key)
+        => key.StartsWith(DisplayMetadataPrefix, StringComparison.Ordinal)
+            || key is ContextWindowTokensKey or TokenizerEncodingKey;
 
     /// <summary>
     /// Builds the format-independent <see cref="ChatOptions"/> shared by every adapter: sampling pulled
