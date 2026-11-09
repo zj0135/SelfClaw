@@ -37,7 +37,8 @@ public sealed class ConversationTitleGeneratorTests
 
         request.Options.Should().NotBeNull();
         var options = request.Options!;
-        options.MaxOutputTokens.Should().Be(256);
+        options.MaxOutputTokens.Should().Be(1_024,
+            "the same budget pays for a reasoning model's thinking, which the provider counts against the answer");
         options.Temperature.Should().BeNull("sampling stays at the provider's default");
         options.TopP.Should().BeNull();
         options.Tools.Should().BeNull();
@@ -99,6 +100,28 @@ public sealed class ConversationTitleGeneratorTests
             .GenerateTitleAsync("hello", null);
 
         title.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Returns_null_and_warns_when_the_model_answers_no_text()
+    {
+        // A thinking model that spends the whole output budget before its first title character answers
+        // finish_reason=length with no text at all (2026-11-09): the only way to tell that apart from a
+        // model that simply said nothing is to log the finish reason and the budget it ran against.
+        var client = new RecordingChatClient((_, _, _) => Task.FromResult(
+            new ChatResponse(new ChatMessage(ChatRole.Assistant, string.Empty))
+            {
+                FinishReason = ChatFinishReason.Length
+            }));
+        var logger = new CapturingLogger();
+
+        var title = await new ConversationTitleGenerator(
+            new DirectAgentChatRuntimeTests.FakeChatClientFactory(client), logger)
+            .GenerateTitleAsync("hello", null);
+
+        title.Should().BeNull();
+        var warning = logger.Messages.Should().ContainSingle().Subject;
+        warning.Should().Contain("no usable text").And.Contain("Budget=1024");
     }
 
     [Fact]

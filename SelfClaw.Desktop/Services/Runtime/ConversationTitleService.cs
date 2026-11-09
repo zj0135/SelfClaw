@@ -71,19 +71,40 @@ internal sealed class ConversationTitleService : IConversationTitleStarter, IAsy
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_shutdown.Token);
             timeout.CancelAfter(GenerationTimeout);
             var title = await _generator.GenerateTitleAsync(start.Prompt, start.ModelProfileId, timeout.Token).ConfigureAwait(false);
-            if (string.IsNullOrWhiteSpace(title)) return;
+            if (string.IsNullOrWhiteSpace(title))
+            {
+                _logger.LogDebug("Conversation title generation returned nothing for {ConversationId}.", start.ConversationId);
+                return;
+            }
+
             var current = await _conversations.GetConversationAsync(start.ConversationId).ConfigureAwait(false);
             // The write must not resurrect a deleted conversation, and it must not clobber a manual rename:
             // the compare-and-swap only passes while the title is still the prompt preview this run read.
-            if (current is null || !string.Equals(current.Title, start.ExpectedTitle, StringComparison.Ordinal)) return;
+            if (current is null || !string.Equals(current.Title, start.ExpectedTitle, StringComparison.Ordinal))
+            {
+                _logger.LogDebug(
+                    "Conversation title write skipped for {ConversationId}: the conversation is gone or was renamed meanwhile.",
+                    start.ConversationId);
+                return;
+            }
+
             // Title-only write: UpdatedAtUtc rides along unchanged, because sidebar ordering and the archive
             // cutoff describe the conversation's real last activity, not this title change.
             await _conversations.UpsertConversationAsync(current with { Title = title }).ConfigureAwait(false);
             TitleChanged?.Invoke(start.ConversationId);
         }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            // Shutdown cancelled the call: keeping the preview title is the answer, and this is not a fault.
+        }
         catch (OperationCanceledException)
         {
-            // The timeout or shutdown cancelled the call: keeping the preview title is the answer.
+            // Only the generation timeout cancels this token otherwise, and a silent timeout is exactly what
+            // made a missing title undiagnosable: the log has to name the budget that ran out.
+            _logger.LogWarning(
+                "Conversation title generation timed out after {Timeout} for {ConversationId}; keeping the existing title.",
+                GenerationTimeout,
+                start.ConversationId);
         }
         catch (Exception exception)
         {

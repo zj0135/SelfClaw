@@ -1,4 +1,5 @@
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Desktop.Services.Runtime;
@@ -147,8 +148,45 @@ public sealed class ConversationTitleServiceTests
         generator.Calls.Should().ContainSingle("a disposed service must not accept new work");
     }
 
+    // 20 秒超时在测试里等不到，但触发它的代码路径就是那个 linked token 被取消：服务必须留下一条 warning，
+    // 否则「标题一直没变」在日志里完全无从判断（2026-11-09 的排查就卡在这里）。
+    [Fact]
+    public async Task Warns_when_the_generation_times_out()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        await fixture.Conversations.InitializeAsync();
+        var conversation = await fixture.CreateConversationAsync("prompt");
+        var logger = new CapturingLogger();
+        await using var service = new ConversationTitleService(
+            new FakeTitleGenerator
+            {
+                OnGenerate = (_, _, token) => Task.FromException<string?>(new OperationCanceledException(token))
+            },
+            fixture.Conversations,
+            logger);
+
+        service.TryStart(new ConversationTitleStart(conversation.Id, "prompt", "prompt", null));
+        await service.WhenIdleAsync();
+
+        logger.Messages.Should().ContainSingle().Which.Should().Contain("timed out");
+        (await fixture.Conversations.GetConversationAsync(conversation.Id))!.Title.Should().Be("prompt");
+    }
+
     private static ConversationTitleService CreateService(ConversationPersistenceFixture fixture, IConversationTitleGenerator generator)
         => new(generator, fixture.Conversations, NullLogger<ConversationTitleService>.Instance);
+
+    private sealed class CapturingLogger : ILogger<ConversationTitleService>
+    {
+        internal List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => logLevel >= LogLevel.Warning;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add($"{logLevel}: {formatter(state, exception)}");
+    }
 
     private sealed class FakeTitleGenerator : IConversationTitleGenerator
     {

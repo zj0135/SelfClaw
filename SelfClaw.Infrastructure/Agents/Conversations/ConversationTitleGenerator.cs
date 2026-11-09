@@ -20,7 +20,12 @@ internal sealed class ConversationTitleGenerator : IConversationTitleGenerator
     // Only the head of a long first message shapes a title; the tail would add cost without changing it.
     private const int MaximumPromptLength = 4_000;
 
-    private const int MaximumOutputTokens = 256;
+    // The cap buys the model's thinking, not just the title: a reasoning provider counts the reasoning and
+    // the answer against one budget, and this model spends anywhere from 100 to 800 output tokens before the
+    // first title character. At 256 a heavier reasoning pass spent the whole cap and the provider answered
+    // finish_reason=length with no text at all, which the caller can only read as "no title" (2026-11-09 log).
+    // 1024 also stays inside the 20 s generation timeout at the throughput this provider serves.
+    private const int TitleOutputTokens = 1_024;
 
     private const string TitleInstruction =
         "You write titles for conversations. The message that follows is the first user message of a conversation. " +
@@ -53,14 +58,27 @@ internal sealed class ConversationTitleGenerator : IConversationTitleGenerator
             };
             // Only the output cap is set: sampling and the profile's reasoning effort (思考等级) stay out of
             // this call so the provider's defaults apply, exactly like DirectContextCompressor.
-            var options = new ChatOptions { MaxOutputTokens = MaximumOutputTokens };
+            var options = new ChatOptions { MaxOutputTokens = TitleOutputTokens };
             // Streaming is the path every provider serves correctly: some OpenAI-compatible endpoints answer a
             // non-streaming request with an empty choices array, which the SDK dereferences unguarded.
             var response = await lease.Client
                 .GetStreamingResponseAsync(messages, options, cancellationToken)
                 .ToChatResponseAsync(cancellationToken)
                 .ConfigureAwait(false);
-            return Sanitize(response.Text);
+            var title = Sanitize(response.Text);
+            if (title is null)
+            {
+                // "The title never changed" is the whole symptom, so an empty answer has to say why it was
+                // empty: a truncated thinking block and a model that silently answered nothing look alike.
+                _logger.LogWarning(
+                    "Conversation title generation produced no usable text; keeping the existing title. " +
+                    "FinishReason={FinishReason}, OutputTokens={OutputTokens}, Budget={Budget}.",
+                    response.FinishReason,
+                    response.Usage?.OutputTokenCount,
+                    TitleOutputTokens);
+            }
+
+            return title;
         }
         catch (OperationCanceledException)
         {

@@ -71,7 +71,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 端到端主干：`docs/pipeline-architecture.md`（全局图）→ `docs/runtime-execution-flow.md`（当前调用链、回合/准入/消费基线）。
 - Direct 输入与队列 / steer 语义：`docs/direct-message-input-design.md`。
 - 输入框图片附件（存储 / 桥 / 队列 / 模型调用 / 前端）：`docs/input-attachment-design.md`。
-- 会话自动标题总结（首条用户消息触发、模型与「不传思考等级」纪律、CAS 写库与 `updated_at` 不变量）：`docs/conversation-title-design.md`。
+- 会话自动标题总结（首条用户消息触发、模型与「不传思考等级」纪律、`MaxOutputTokens` 是「思考 + 标题」共享预算、CAS 写库与 `updated_at` 不变量）：`docs/conversation-title-design.md`。
 - 输入框快捷命令（`@` 文件 / `/` 指令 / `$` 技能的行内 chip：触发规则、token 形态、`plaintext-only` 编辑器、弹层键盘与数据源）：`docs/composer-mention-design.md`。
 - `read_file` 读取图片（tool result 携带图片、三种协议投递、live-only 回放）：`docs/direct-tool-result-image-design.md`。
 - Direct `ask_user` 提问工具（强制中断语义、AskUserRules 限额、绑定闸门、`questionRequestId` 协议）：`docs/direct-ask-user-design.md`。
