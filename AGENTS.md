@@ -63,7 +63,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - **Legacy provider profiles**（`ProviderProfile`、`IProfileRepository`、`profiles` 表、`ChatTurnRequest.Profile/ApiKey`）：已删除；Direct 只用 `ModelProfileId`。
 - **Queue / Steer 开关**（`ConversationInputFeatureSwitch`、`SELFCLAW_QUEUE_ENABLED` / `SELFCLAW_STEER_ENABLED`）：已删除，队列与 steer 始终开启；不要再引入默认关闭开关、`queue-disabled` / `steer-not-enabled` / `pending-inputs` 分支或宿主「未启用」文案，暂停只由每会话队列状态表达。设计要求见 `docs/direct-message-input-design.md` §11。
 - **附件（旧「输入入口一律拒绝」已废）**：图片附件已接入 Direct 交互式输入（见 `docs/input-attachment-design.md`）：仅图片、仅 Direct、单文件 10 MiB、每条最多 6 张、需要模型声明多模态；CLI 与子代理不支持。`attachments-unsupported` 仅作为历史 reason 保留，不要再把它当输入入口的拒绝原因。
-- **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物 / 上下文压缩已接宿主；自动化已接宿主（`AutomationView` + `AutomationBridge`，含删除/清空历史与体积显示）；其余页面（图像生成、翻译等）是前端 mock。
+- **设置页**：AI 提供商 / 模型管理 / 编程助手 / 代理助手 / 插件 / 宠物 / 上下文压缩已接宿主；自动化已接宿主（`AutomationView` + `AutomationBridge`，含删除/清空历史与体积显示）；图像生成已接宿主（`ImageGenerationView` + `ImageGenerationBridge`，OpenAI Images 协议，见 `docs/image-generation-design.md`）；其余页面（翻译等）仍是前端 mock。
 - **`image_tool_results` 模型选项**：`read_file` 读图曾有一个模型级逃生开关，现**已删除**。`IsMultimodal == true` 即表示支持 tool result 携带图片，协议只决定投递形状（见 `docs/direct-tool-result-image-design.md` §3）。不要再引入第二个开关、`Unsupported` 的「选项已关闭」分支或相应文案。
 
 ## 深入阅读
@@ -79,6 +79,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - 侧栏会话分组（项目 / 对话 / 归档：168 小时归档判定、宿主导航时间戳、文件夹 id 前缀与陈旧 `updated_at` 陷阱）：`docs/sidebar-archive-design.md`。
 - 右侧功能面板（聊天视图 SideDock：终端 / 子代理看板的承载、开合与宿主终端状态映射、新增工具 tab 的方式）：`docs/side-dock-design.md`。
 - 右侧面板「审查」工具（工作区 Git diff：`git-diff/*` 协议与「非仓库不是错误」的回包规则、workspace 子树作用域、未跟踪文件合成、限额与空态）：`docs/git-review-pane-design.md`。
+- 生图工作台（OpenAI Images 协议：按模型能力协商 size/quality/style/n、6 分钟长请求的超时与 `jobId` 取消、产物走 `generated-images.selfclaw.local` 虚拟主机与 7 天保留、与聊天模型列表的隔离）：`docs/image-generation-design.md`。
 - 关于页应用用量仪表盘：`docs/app-usage-dashboard-design.md`（数据契约、热力图/趋势/环形口径、SQL 分桶边界）。
 - 网络出口 / 代理（本地 / 系统 / 自定义三档语义、覆盖与刻意不覆盖的请求、生效时机、为什么 WebView2 不接入）：`docs/network-proxy-design.md`。
 - 主进程单例（mutex + 命名事件、后启动的进程怎样把窗口叫到前面、关闭竞态的宽限、为什么需要强抢前台、刻意不做的事）：`docs/single-instance-design.md`。

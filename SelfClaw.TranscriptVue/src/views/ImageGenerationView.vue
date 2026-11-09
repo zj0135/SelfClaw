@@ -7,6 +7,7 @@ import {
 	Loader2,
 	AlertCircle,
 	CheckCircle2,
+	XCircle,
 } from 'lucide-vue-next';
 import { useImageStudio } from '../composables/useImageStudio.js';
 import ImagePreviewGrid from '../components/image-generation/ImagePreviewGrid.vue';
@@ -22,39 +23,39 @@ const {
 	models,
 	loadingModels,
 	selectedModelProfileId,
+	sizeOptions,
+	qualityOptions,
+	styleOptions,
+	maxCount,
 	prompt,
-	negativePrompt,
-	selectedSizeKey,
+	selectedSize,
 	count,
-	steps,
-	cfgScale,
 	quality,
 	style,
 	referenceImage,
 	isGenerating,
+	cancelling,
 	zoomLevel,
 	gallery,
 	statusMessage,
 	errorMessage,
+	loadModels,
 	appendTag,
 	resetParams,
 	removeImage,
+	clearGallery,
 	setZoom,
 	setReferenceImageFile,
 	clearReferenceImage,
 	generate,
+	cancel,
 } = useImageStudio();
 
 function handlePreviewFullscreen(image) {
 	if (image?.url) {
 		emit('preview-image', {
 			src: image.url,
-			alt: image.prompt || 'Generated preview image',
-		});
-	} else if (gallery.length > 0) {
-		emit('preview-image', {
-			src: gallery[0].url,
-			alt: gallery[0].prompt || 'Generated preview image',
+			alt: image.prompt || '生成的图片',
 		});
 	}
 }
@@ -77,32 +78,29 @@ onBeforeUnmount(() => {
 
 <template>
 	<div class="studio-root">
-		<!-- 顶栏页面标题 -->
 		<header class="studio-header">
 			<h1 class="studio-title">生图工作台</h1>
 			<p class="studio-sub">输入创意，生成高质量的图片</p>
 		</header>
 
-		<!-- 左右两栏主舞台 -->
 		<div class="studio-body">
-			<!-- 左侧：图片预览卡片 -->
 			<section class="left-stage">
 				<ImagePreviewGrid
 					:gallery="gallery"
 					:zoom-level="zoomLevel"
 					:reference-image="referenceImage"
+					:is-generating="isGenerating"
 					@zoom-in="setZoom(10)"
 					@zoom-out="setZoom(-10)"
 					@remove-image="removeImage"
+					@clear-gallery="clearGallery"
 					@preview-fullscreen="handlePreviewFullscreen"
 					@upload-reference="setReferenceImageFile"
 					@clear-reference="clearReferenceImage"
 				/>
 			</section>
 
-			<!-- 右侧：参数设置卡片 -->
 			<section class="right-panel">
-				<!-- 卡片顶栏 -->
 				<div class="params-header">
 					<div class="params-title-group">
 						<Settings :size="18" class="settings-icon" />
@@ -115,66 +113,69 @@ onBeforeUnmount(() => {
 					</button>
 				</div>
 
-				<!-- 可滚动表单区域 -->
 				<div class="params-form-scroll">
-					<!-- 模型选择（严格仅展示生图协议模型） -->
 					<ImageModelPicker
 						:models="models"
 						:selected-model-id="selectedModelProfileId"
 						:loading="loadingModels"
 						@select-model="selectedModelProfileId = $event"
+						@reload="loadModels"
 					/>
 
-					<!-- 提示词与标签 -->
 					<ImagePromptSection
 						v-model:prompt="prompt"
-						v-model:negative-prompt="negativePrompt"
 						@append-tag="appendTag"
 					/>
 
-					<!-- 图片尺寸选择器 -->
 					<ImageSizeSelector
-						:selected-key="selectedSizeKey"
-						@select-size="selectedSizeKey = $event"
+						v-if="sizeOptions.length"
+						:sizes="sizeOptions"
+						:selected="selectedSize"
+						@select-size="selectedSize = $event"
 					/>
 
-					<!-- 滑块控制群：数量、步数、CFG -->
 					<ImageSliderControls
 						v-model:count="count"
-						v-model:steps="steps"
-						v-model:cfg-scale="cfgScale"
+						:max-count="maxCount"
 					/>
 
-					<!-- 高级设置折叠栏：画质与画风 -->
 					<ImageAdvancedOptions
 						v-model:quality="quality"
 						v-model:style-val="style"
+						:qualities="qualityOptions"
+						:styles="styleOptions"
 					/>
 				</div>
 
-				<!-- 状态与错误提示栏 -->
-				<div v-if="errorMessage" class="notice-bar error">
+				<div v-if="errorMessage" class="notice-bar error" role="alert">
 					<AlertCircle :size="14" class="notice-icon" />
 					<span class="notice-text">{{ errorMessage }}</span>
 				</div>
-				<div v-else-if="statusMessage" class="notice-bar success">
+				<div v-else-if="statusMessage" class="notice-bar success" role="status">
 					<CheckCircle2 :size="14" class="notice-icon" />
 					<span class="notice-text">{{ statusMessage }}</span>
 				</div>
 
-				<!-- 底部开始生成大按钮 -->
 				<div class="params-footer">
 					<button
+						v-if="isGenerating"
+						type="button"
+						class="cancel-action-btn"
+						:disabled="cancelling"
+						@click="cancel"
+					>
+						<XCircle :size="16" />
+						<span>{{ cancelling ? '正在取消…' : '取消生成' }}</span>
+					</button>
+					<button
+						v-else
 						type="button"
 						class="generate-action-btn"
-						:disabled="isGenerating || !prompt.trim()"
+						:disabled="!prompt.trim() || !models.length"
 						@click="generate"
 					>
-						<Loader2 v-if="isGenerating" :size="18" class="spin-icon" />
-						<Sparkles v-else :size="18" class="sparkle-icon" />
-						<span class="btn-main-text">
-							{{ isGenerating ? '正在生成中...' : `开始生成 (${count}张)` }}
-						</span>
+						<Sparkles :size="18" class="sparkle-icon" />
+						<span class="btn-main-text">开始生成 ({{ count }}张)</span>
 						<span class="shortcut-chip">Ctrl ↵</span>
 					</button>
 				</div>
@@ -332,7 +333,8 @@ onBeforeUnmount(() => {
 	flex-shrink: 0;
 }
 
-.generate-action-btn {
+.generate-action-btn,
+.cancel-action-btn {
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -341,13 +343,16 @@ onBeforeUnmount(() => {
 	height: 46px;
 	border: none;
 	border-radius: 12px;
-	background: var(--accent-base, #3b5bfd);
-	color: #ffffff;
 	font-size: 14.5px;
 	font-weight: 600;
 	cursor: pointer;
-	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent-base, #3b5bfd) 35%, transparent);
 	transition: all 0.18s ease;
+}
+
+.generate-action-btn {
+	background: var(--accent-base, #3b5bfd);
+	color: #ffffff;
+	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent-base, #3b5bfd) 35%, transparent);
 }
 
 .generate-action-btn:hover:not(:disabled) {
@@ -363,6 +368,23 @@ onBeforeUnmount(() => {
 	box-shadow: none;
 }
 
+.cancel-action-btn {
+	background: var(--surface-muted, #f1f3f6);
+	color: var(--ink-2, #454c59);
+	border: 1px solid var(--line-card, #e3e6ec);
+}
+
+.cancel-action-btn:hover:not(:disabled) {
+	background: #fee2e2;
+	color: #b91c1c;
+	border-color: #fecaca;
+}
+
+.cancel-action-btn:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
 .btn-main-text {
 	letter-spacing: 0.3px;
 }
@@ -376,20 +398,6 @@ onBeforeUnmount(() => {
 	font-variant-numeric: tabular-nums;
 }
 
-.spin-icon {
-	animation: spin 1s linear infinite;
-}
-
-@keyframes spin {
-	from {
-		transform: rotate(0deg);
-	}
-	to {
-		transform: rotate(360deg);
-	}
-}
-
-/* 响应式调整 */
 @media (max-width: 960px) {
 	.studio-body {
 		grid-template-columns: 1fr;

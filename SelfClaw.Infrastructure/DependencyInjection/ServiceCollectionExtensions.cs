@@ -225,14 +225,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IAiProviderSettingsService>(provider => provider.GetRequiredService<AiProviderSettingsService>());
         services.AddSingleton<IAiModelCatalog>(provider => provider.GetRequiredService<AiProviderSettingsService>());
         services.AddSingleton<IAiChatClientFactory, AiChatClientFactory>();
+        services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
         services.AddSingleton<IImageGenerationService>(serviceProvider =>
             new ImageGenerationService(
                 serviceProvider.GetRequiredService<IAiProviderRepository>(),
                 serviceProvider.GetRequiredService<AiProviderRegistry>(),
                 serviceProvider.GetRequiredService<ISecretProtector>(),
-                serviceProvider.GetRequiredService<AiProviderHttpClientProvider>(),
-                serviceProvider.GetService<ILogger<ImageGenerationService>>()));
-        services.AddSingleton<ISecretProtector, DpapiSecretProtector>();
+                serviceProvider.GetRequiredService<AiProviderHttpClientProvider>()));
         services.AddSingleton<WorkspaceFileService>();
         services.AddSingleton<WorkspaceSearchService>();
         // A host that owns the settings file replaces this registration with its preference source.

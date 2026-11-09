@@ -32,6 +32,13 @@ public static class AiProviderProtocols
                 AiProviderAuthKind.ApiKey,
                 SupportsModelListing: true),
             new AiProviderProtocolOption(
+                "openai-images",
+                "OpenAI Images 兼容 (生图)",
+                AiProviderKind.OpenAICompatible,
+                AiProviderApiFormat.OpenAIImages,
+                AiProviderAuthKind.ApiKey,
+                SupportsModelListing: true),
+            new AiProviderProtocolOption(
                 "anthropic",
                 "Anthropic 协议",
                 AiProviderKind.Anthropic,

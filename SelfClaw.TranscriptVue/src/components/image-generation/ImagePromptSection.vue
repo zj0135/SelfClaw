@@ -1,29 +1,22 @@
 <script setup>
 import { ref } from 'vue';
 import { ChevronDown, ChevronUp } from 'lucide-vue-next';
-import { COMMON_TAGS, EXTENDED_TAGS } from '../../composables/useImageStudio.js';
+import { COMMON_TAGS, EXTENDED_TAGS } from '../../renderers/imageStudio.js';
 
-const props = defineProps({
+defineProps({
 	prompt: { type: String, default: '' },
-	negativePrompt: { type: String, default: '' },
 });
 
 const emit = defineEmits([
 	'update:prompt',
-	'update:negativePrompt',
 	'append-tag',
 ]);
 
 const showMoreTags = ref(false);
-
-function toggleMoreTags() {
-	showMoreTags.value = !showMoreTags.value;
-}
 </script>
 
 <template>
 	<div class="prompt-section">
-		<!-- 正向提示词 -->
 		<div class="field-block">
 			<label class="field-label" for="studio-prompt-input">提示词</label>
 			<div class="textarea-shell">
@@ -54,14 +47,12 @@ function toggleMoreTags() {
 					{{ tag }}
 				</button>
 
-				<!-- 展开/收起更多标签按钮 -->
-				<button type="button" class="tag-pill more-btn" @click="toggleMoreTags">
+				<button type="button" class="tag-pill more-btn" @click="showMoreTags = !showMoreTags">
 					<span>{{ showMoreTags ? '收起' : '更多' }}</span>
 					<component :is="showMoreTags ? ChevronUp : ChevronDown" :size="12" />
 				</button>
 			</div>
 
-			<!-- 扩展标签流 -->
 			<div v-if="showMoreTags" class="tags-flow extended">
 				<button
 					v-for="tag in EXTENDED_TAGS"
@@ -72,23 +63,6 @@ function toggleMoreTags() {
 				>
 					{{ tag }}
 				</button>
-			</div>
-		</div>
-
-		<!-- 负向提示词 (可选) -->
-		<div class="field-block">
-			<label class="field-label" for="studio-neg-prompt-input">负向提示词 (可选)</label>
-			<div class="textarea-shell compact">
-				<textarea
-					id="studio-neg-prompt-input"
-					:value="negativePrompt"
-					rows="2"
-					maxlength="500"
-					placeholder="例如：低质量，模糊，畸形，文本，水印..."
-					class="custom-textarea compact"
-					@input="emit('update:negativePrompt', $event.target.value)"
-				></textarea>
-				<span class="char-count">{{ negativePrompt.length }} / 500</span>
 			</div>
 		</div>
 	</div>
@@ -126,10 +100,6 @@ function toggleMoreTags() {
 .textarea-shell:focus-within {
 	border-color: var(--accent-base, #3b5bfd);
 	box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-base, #3b5bfd) 15%, transparent);
-}
-
-.textarea-shell.compact {
-	padding-bottom: 22px;
 }
 
 .custom-textarea {

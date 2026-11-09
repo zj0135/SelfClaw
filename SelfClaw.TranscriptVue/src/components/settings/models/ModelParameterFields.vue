@@ -13,6 +13,7 @@ const formatNames = {
 	0: 'OpenAI Chat Completions (/v1/chat/completions)',
 	1: 'OpenAI Responses (/v1/responses)',
 	2: 'Anthropic Messages (/v1/messages)',
+	3: 'OpenAI Images (/v1/images/generations)',
 };
 
 const availableFormats = computed(() => {

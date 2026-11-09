@@ -14,6 +14,7 @@ using SelfClaw.Desktop.Services.Terminal;
 using SelfClaw.Desktop.Services.WebView;
 using SelfClaw.Desktop.ViewModels;
 using SelfClaw.Infrastructure.Attachments;
+using SelfClaw.Infrastructure.ImageGeneration;
 using SelfClaw.Infrastructure.Options;
 using SelfClaw.Desktop.Services.Windowing;
 using Microsoft.Extensions.Logging;
@@ -187,6 +188,15 @@ public sealed partial class MainWindow : Window
             TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
                 AttachmentPathResolver.AttachmentHostName,
                 attachmentsRootPath,
+                CoreWebView2HostResourceAccessKind.Allow);
+
+            // Generated images are served the same way attachments are: as URLs, so a four-image batch
+            // never has to travel back through postMessage as base64.
+            var generatedImagesRootPath = GeneratedImagePathResolver.ResolveRoot(_storagePaths.AppDataDirectory);
+            Directory.CreateDirectory(generatedImagesRootPath);
+            TranscriptView.CoreWebView2.SetVirtualHostNameToFolderMapping(
+                GeneratedImagePathResolver.HostName,
+                generatedImagesRootPath,
                 CoreWebView2HostResourceAccessKind.Allow);
 
             TranscriptView.Source = new Uri($"https://{AssetsHostName}/TranscriptVue/index.html");

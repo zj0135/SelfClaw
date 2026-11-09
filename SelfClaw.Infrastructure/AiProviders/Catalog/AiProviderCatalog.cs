@@ -25,7 +25,7 @@ public static class AiProviderCatalog
                 AiProviderKind.OpenAI,
                 "https://api.openai.com/v1/",
                 AiProviderApiFormat.OpenAIResponses,
-                [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses],
+                [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses, AiProviderApiFormat.OpenAIImages],
                 AiProviderAuthKind.ApiKey,
                 supportsModelListing: true),
             Entry(
@@ -47,7 +47,7 @@ public static class AiProviderCatalog
                 AiProviderKind.OpenAICompatible,
                 "https://api.example.com/v1/",
                 AiProviderApiFormat.OpenAIChatCompletions,
-                [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses],
+                [AiProviderApiFormat.OpenAIChatCompletions, AiProviderApiFormat.OpenAIResponses, AiProviderApiFormat.OpenAIImages],
                 AiProviderAuthKind.ApiKey,
                 supportsModelListing: true)
         ]);

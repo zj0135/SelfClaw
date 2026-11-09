@@ -395,6 +395,9 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
 
         return profiles
             .Where(profile => connections.ContainsKey(profile.ProviderConnectionId))
+            // This list is the composer's model picker: an image-only profile would be selectable and
+            // then fail inside the chat client, so it never reaches the renderer.
+            .Where(profile => profile.ApiFormat.IsChatFormat())
             .Select(profile => new EnabledModelView(
                 profile.Id,
                 profile.Configuration?.Name ?? profile.Name,
@@ -411,14 +414,19 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
         => await ResolveUsableModelAsync(modelProfileId, cancellationToken).ConfigureAwait(false) is not null;
 
     /// <summary>
-    /// Resolves the model once and answers whether it can actually run: enabled model, enabled connection
-    /// and an adapter that speaks its API format. Availability and the image gate must agree, and neither
-    /// caller should read the profile three times to find out.
+    /// Resolves the model once and answers whether it can actually run a chat turn: enabled model,
+    /// enabled connection, an adapter that speaks its API format, and a format that speaks chat at all.
+    /// Availability and the image gate must agree, and neither caller should read the profile three
+    /// times to find out.
     /// </summary>
     private async Task<AiModelProfile?> ResolveUsableModelAsync(Guid modelProfileId, CancellationToken cancellationToken)
     {
         var profile = await _repository.GetModelProfileAsync(modelProfileId, cancellationToken).ConfigureAwait(false);
-        if (profile is not { IsEnabled: true }) return null;
+        if (profile is not { IsEnabled: true } || !profile.ApiFormat.IsChatFormat())
+        {
+            return null;
+        }
+
         var connection = await _repository.GetProviderConnectionAsync(profile.ProviderConnectionId, cancellationToken).ConfigureAwait(false);
         return connection is { IsEnabled: true } && _registry.GetRequiredAdapter(connection.ProviderKind).SupportsApiFormat(profile.ApiFormat)
             ? profile
@@ -439,6 +447,15 @@ internal sealed class AiProviderSettingsService : IAiProviderSettingsService, IA
         {
             throw new NotSupportedException(
                 $"Provider '{connection.Name}' does not support API format '{profile.ApiFormat}'.");
+        }
+
+        if (!profile.ApiFormat.IsChatFormat())
+        {
+            // Probing an image model with a chat ping can only ever fail; the workbench is where its
+            // connectivity is actually exercised.
+            throw new NotSupportedException(
+                $"Model '{profile.Name}' uses image generation format '{profile.ApiFormat}'; " +
+                "test it from the image workbench instead of the chat connectivity probe.");
         }
 
         var secrets = await ResolveSecretsAsync(connection, cancellationToken).ConfigureAwait(false);

@@ -16,4 +16,10 @@ public interface IImageGenerationService
         Guid? modelProfileId,
         ImageEditRequest request,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pure lookup, no I/O: the workbench builds its size/quality/style controls from this before it
+    /// ever sends a request.
+    /// </summary>
+    ImageGenerationModelCapabilities GetModelCapabilities(string model);
 }

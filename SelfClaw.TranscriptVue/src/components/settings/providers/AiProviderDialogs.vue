@@ -18,6 +18,7 @@ const formatNames = {
 	0: 'OpenAI Chat Completions',
 	1: 'OpenAI Responses',
 	2: 'Anthropic Messages',
+	3: 'OpenAI Images',
 };
 </script>
 

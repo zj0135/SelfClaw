@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref, onMounted, onBeforeUnmount } from 'vue';
-import { Layers, ChevronDown, Check, AlertCircle } from 'lucide-vue-next';
+import { Layers, ChevronDown, Check, AlertCircle, RotateCw } from 'lucide-vue-next';
 
 const props = defineProps({
 	models: { type: Array, required: true },
@@ -8,20 +8,19 @@ const props = defineProps({
 	loading: { type: Boolean, default: false },
 });
 
-const emit = defineEmits(['select-model']);
+const emit = defineEmits(['select-model', 'reload']);
 
 const isOpen = ref(false);
 const dropdownRef = ref(null);
 
+// 没有模型时不编一个假模型顶上：显示的是什么就该是什么，否则用户会对着一个
+// 不存在的模型点生成。
 const activeModel = computed(() => {
-	const found = props.models.find((m) => m.profileId === props.selectedModelId);
-	if (found) return found;
-	if (props.models.length > 0) return props.models[0];
-	return {
-		name: '通用生图模型 (SDXL)',
-		description: '适合大多数场景，生成效果平衡',
-		isFallback: true,
-	};
+	if (props.selectedModelId) {
+		const found = props.models.find((model) => model.profileId === props.selectedModelId);
+		if (found) return found;
+	}
+	return props.models[0] || null;
 });
 
 function toggleDropdown() {
@@ -37,6 +36,13 @@ function handleSelect(model) {
 function onClickOutside(event) {
 	if (dropdownRef.value && !dropdownRef.value.contains(event.target)) {
 		isOpen.value = false;
+	}
+}
+
+function onTriggerKeydown(event) {
+	if (event.key === 'Enter' || event.key === ' ') {
+		event.preventDefault();
+		toggleDropdown();
 	}
 }
 
@@ -57,7 +63,12 @@ onBeforeUnmount(() => {
 		<div
 			class="model-select-card"
 			:class="{ active: isOpen, disabled: models.length === 0 }"
+			role="button"
+			:tabindex="models.length === 0 ? -1 : 0"
+			:aria-expanded="isOpen"
+			aria-haspopup="listbox"
 			@click="toggleDropdown"
+			@keydown="onTriggerKeydown"
 		>
 			<div class="model-icon-box">
 				<Layers :size="20" class="icon-inner" />
@@ -65,10 +76,10 @@ onBeforeUnmount(() => {
 
 			<div class="model-text-group">
 				<div class="model-title-row">
-					<span class="model-title">{{ activeModel.name }}</span>
-					<span v-if="activeModel.providerName" class="provider-badge">{{ activeModel.providerName }}</span>
+					<span class="model-title">{{ activeModel?.name || '未选择模型' }}</span>
+					<span v-if="activeModel?.providerName" class="provider-badge">{{ activeModel.providerName }}</span>
 				</div>
-				<div class="model-sub">{{ activeModel.description }}</div>
+				<div class="model-sub">{{ activeModel?.description || '尚未配置生图模型' }}</div>
 			</div>
 
 			<div class="model-arrow">
@@ -77,7 +88,7 @@ onBeforeUnmount(() => {
 		</div>
 
 		<!-- 下拉浮层 -->
-		<div v-if="isOpen" class="dropdown-popover">
+		<div v-if="isOpen" class="dropdown-popover" role="listbox">
 			<div class="popover-header">
 				<span>已过滤：仅生图协议模型 (OpenAIImages)</span>
 			</div>
@@ -88,7 +99,11 @@ onBeforeUnmount(() => {
 					:key="item.profileId"
 					class="model-option"
 					:class="{ selected: item.profileId === selectedModelId }"
+					role="option"
+					:aria-selected="item.profileId === selectedModelId"
+					tabindex="0"
 					@click="handleSelect(item)"
+					@keydown.enter.prevent="handleSelect(item)"
 				>
 					<div class="option-content">
 						<div class="option-name-row">
@@ -106,6 +121,10 @@ onBeforeUnmount(() => {
 		<div v-if="models.length === 0 && !loading" class="no-models-hint">
 			<AlertCircle :size="14" class="hint-icon" />
 			<span>未检测到 OpenAIImages 格式的模型，可在提供商设置中添加</span>
+			<button type="button" class="retry-btn" title="重新加载模型" @click="emit('reload')">
+				<RotateCw :size="12" />
+				<span>重试</span>
+			</button>
 		</div>
 	</div>
 </template>
@@ -140,6 +159,11 @@ onBeforeUnmount(() => {
 .model-select-card:hover {
 	border-color: var(--accent-base, #3b5bfd);
 	background: var(--surface-soft, #f7f8fa);
+}
+
+.model-select-card:focus-visible {
+	outline: 2px solid var(--accent-base, #3b5bfd);
+	outline-offset: 2px;
 }
 
 .model-select-card.active {
@@ -271,6 +295,11 @@ onBeforeUnmount(() => {
 	background: var(--surface-hover, #eef0f4);
 }
 
+.model-option:focus-visible {
+	outline: 2px solid var(--accent-base, #3b5bfd);
+	outline-offset: -2px;
+}
+
 .model-option.selected {
 	background: color-mix(in srgb, var(--accent-base, #3b5bfd) 8%, var(--surface-base, #ffffff));
 }
@@ -329,5 +358,23 @@ onBeforeUnmount(() => {
 
 .hint-icon {
 	flex-shrink: 0;
+}
+
+.retry-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	margin-left: auto;
+	padding: 2px 7px;
+	font-size: 11px;
+	color: #b45309;
+	background: transparent;
+	border: 1px solid #fcd34d;
+	border-radius: 6px;
+	cursor: pointer;
+}
+
+.retry-btn:hover {
+	background: #fef3c7;
 }
 </style>

@@ -119,4 +119,35 @@ public sealed class DesktopServiceRegistrationTests
                 if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
             }
         });
+
+    /// <summary>
+    /// The image workbench is wired through a factory because its constructor is internal; a
+    /// mis-ordered registration (the factory needs <c>ISecretProtector</c>) must fail here rather than
+    /// at the first render.
+    /// </summary>
+    [Fact]
+    public Task Desktop_registration_resolves_the_image_generation_graph()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            var root = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));
+            var paths = StoragePathDefaults.Create(root, Path.Combine(root, "selfclaw.db"), Path.Combine(root, "secrets"));
+            try
+            {
+                var services = new ServiceCollection();
+                services.AddLogging();
+                services.AddSelfClawInfrastructure(paths);
+                services.AddSelfClawDesktop(Dispatcher.CurrentDispatcher);
+                await using var provider = services.BuildServiceProvider();
+
+                var imageService = provider.GetRequiredService<IImageGenerationService>();
+                imageService.GetModelCapabilities("dall-e-3").MaxCount.Should().Be(1);
+                provider.GetRequiredService<SelfClaw.Desktop.Services.ImageGeneration.ImageGenerationBridge>().Should().NotBeNull();
+                await Task.CompletedTask;
+            }
+            finally
+            {
+                SqliteTestPools.ClearFor(paths.DatabasePath);
+                if (Directory.Exists(root)) Directory.Delete(root, recursive: true);
+            }
+        });
 }

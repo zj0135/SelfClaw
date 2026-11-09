@@ -8,19 +8,29 @@ using OpenAI.Images;
 using SelfClaw.Core.Interfaces;
 using SelfClaw.Core.Models;
 
-#pragma warning disable OPENAI001
-
 namespace SelfClaw.Infrastructure.ImageGeneration;
+
+#pragma warning disable OPENAI001
 
 internal sealed class OpenAiImageGenerationClient : IImageGenerationClient
 {
     private readonly ImageClient _imageClient;
+    private readonly string _model;
+    private readonly ImageGenerationModelCapabilities _capabilities;
     private readonly Guid? _modelProfileId;
 
-    public OpenAiImageGenerationClient(ImageClient imageClient, Guid? modelProfileId = null)
+    public OpenAiImageGenerationClient(
+        ImageClient imageClient,
+        string model,
+        ImageGenerationModelCapabilities capabilities,
+        Guid? modelProfileId = null)
     {
         ArgumentNullException.ThrowIfNull(imageClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(model);
+        ArgumentNullException.ThrowIfNull(capabilities);
         _imageClient = imageClient;
+        _model = model;
+        _capabilities = capabilities;
         _modelProfileId = modelProfileId;
     }
 
@@ -29,18 +39,19 @@ internal sealed class OpenAiImageGenerationClient : IImageGenerationClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        EnsurePrompt(request.Prompt);
+        EnsureCount(request.Count);
 
         var options = new ImageGenerationOptions
         {
-            Quality = ResolveQuality(request.Quality),
             Size = ResolveSize(request.Size),
-            Style = ResolveStyle(request.Style),
-            ResponseFormat = ResolveFormat(request.ResponseFormat)
+            Quality = ResolveQuality(request.Quality)
         };
-
-        if (!string.IsNullOrWhiteSpace(request.User))
+        // Both fields are omitted for families that do not accept them (gpt-image-1 answers 400 to
+        // response_format and style), which is why neither is set unconditionally.
+        if (_capabilities.Styles.Count > 0)
         {
-            options.EndUserId = request.User;
+            options.Style = ResolveStyle(request.Style);
         }
 
         var stopwatch = Stopwatch.StartNew();
@@ -51,16 +62,7 @@ internal sealed class OpenAiImageGenerationClient : IImageGenerationClient
             cancellationToken).ConfigureAwait(false);
         stopwatch.Stop();
 
-        var items = new List<GeneratedImageItem>(response.Value.Count);
-        foreach (var image in response.Value)
-        {
-            items.Add(new GeneratedImageItem(
-                image.ImageBytes?.ToMemory(),
-                image.ImageUri,
-                image.RevisedPrompt));
-        }
-
-        return new ImageGenerationResult(items, stopwatch.Elapsed, _modelProfileId);
+        return Map(response.Value, stopwatch.Elapsed);
     }
 
     public async Task<ImageGenerationResult> GenerateImageEditsAsync(
@@ -68,54 +70,31 @@ internal sealed class OpenAiImageGenerationClient : IImageGenerationClient
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-
-        var options = new ImageEditOptions
+        EnsurePrompt(request.Prompt);
+        EnsureCount(request.Count);
+        if (request.Image.IsEmpty)
         {
-            Size = ResolveSize(request.Size),
-            ResponseFormat = ResolveFormat(request.ResponseFormat)
-        };
-
-        if (!string.IsNullOrWhiteSpace(request.User))
-        {
-            options.EndUserId = request.User;
+            throw new ArgumentException("An image edit requires the source image bytes.", nameof(request));
         }
 
-        var imageFileName = string.IsNullOrWhiteSpace(request.ImageFileName) ? "image.png" : request.ImageFileName;
+        var options = new ImageEditOptions { Size = ResolveSize(request.Size) };
         await using var imageStream = new MemoryStream(request.Image.ToArray());
 
         var stopwatch = Stopwatch.StartNew();
-        GeneratedImageCollection images;
-
-        if (request.Mask is { } maskData && !maskData.IsEmpty)
-        {
-            var maskFileName = string.IsNullOrWhiteSpace(request.MaskFileName) ? "mask.png" : request.MaskFileName;
-            await using var maskStream = new MemoryStream(maskData.ToArray());
-
-            var response = await _imageClient.GenerateImageEditsAsync(
-                imageStream,
-                imageFileName,
-                request.Prompt,
-                maskStream,
-                maskFileName,
-                request.Count,
-                options,
-                cancellationToken).ConfigureAwait(false);
-            images = response.Value;
-        }
-        else
-        {
-            var response = await _imageClient.GenerateImageEditsAsync(
-                imageStream,
-                imageFileName,
-                request.Prompt,
-                request.Count,
-                options,
-                cancellationToken).ConfigureAwait(false);
-            images = response.Value;
-        }
-
+        var response = await _imageClient.GenerateImageEditsAsync(
+            imageStream,
+            "image.png",
+            request.Prompt,
+            request.Count,
+            options,
+            cancellationToken).ConfigureAwait(false);
         stopwatch.Stop();
 
+        return Map(response.Value, stopwatch.Elapsed);
+    }
+
+    private ImageGenerationResult Map(GeneratedImageCollection images, TimeSpan duration)
+    {
         var items = new List<GeneratedImageItem>(images.Count);
         foreach (var image in images)
         {
@@ -125,38 +104,39 @@ internal sealed class OpenAiImageGenerationClient : IImageGenerationClient
                 image.RevisedPrompt));
         }
 
-        return new ImageGenerationResult(items, stopwatch.Elapsed, _modelProfileId);
+        return new ImageGenerationResult(items, duration, _modelProfileId);
     }
 
-    private static GeneratedImageQuality ResolveQuality(ImageGenerationQuality quality) =>
-        quality switch
-        {
-            ImageGenerationQuality.Hd => GeneratedImageQuality.High,
-            _ => GeneratedImageQuality.Standard
-        };
-
-    private static GeneratedImageStyle ResolveStyle(ImageGenerationStyle style) =>
-        style switch
-        {
-            ImageGenerationStyle.Natural => GeneratedImageStyle.Natural,
-            _ => GeneratedImageStyle.Vivid
-        };
-
-    private static GeneratedImageFormat ResolveFormat(ImageGenerationResponseFormat format) =>
-        format switch
-        {
-            ImageGenerationResponseFormat.Uri => GeneratedImageFormat.Uri,
-            _ => GeneratedImageFormat.Bytes
-        };
-
-    private static GeneratedImageSize ResolveSize(string? size)
+    private static void EnsurePrompt(string prompt)
     {
-        if (string.IsNullOrWhiteSpace(size))
+        if (string.IsNullOrWhiteSpace(prompt))
         {
-            return GeneratedImageSize.W1024xH1024;
+            throw new ArgumentException("An image request requires a prompt.", nameof(prompt));
+        }
+    }
+
+    private void EnsureCount(int count)
+    {
+        if (count < 1 || count > _capabilities.MaxCount)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(count),
+                count,
+                $"Model '{_model}' can generate between 1 and {_capabilities.MaxCount} image(s) per request.");
+        }
+    }
+
+    private GeneratedImageSize ResolveSize(string? size)
+    {
+        var value = string.IsNullOrWhiteSpace(size) ? _capabilities.Sizes[0] : size.Trim().ToLowerInvariant();
+        if (!_capabilities.Sizes.Contains(value))
+        {
+            throw new ArgumentException(
+                $"Model '{_model}' does not support size '{value}'. Supported sizes: {string.Join(", ", _capabilities.Sizes)}.",
+                nameof(size));
         }
 
-        return size.Trim().ToLowerInvariant() switch
+        return value switch
         {
             "256x256" => GeneratedImageSize.W256xH256,
             "512x512" => GeneratedImageSize.W512xH512,
@@ -165,7 +145,33 @@ internal sealed class OpenAiImageGenerationClient : IImageGenerationClient
             "1536x1024" => GeneratedImageSize.W1536xH1024,
             "1024x1792" => GeneratedImageSize.W1024xH1792,
             "1792x1024" => GeneratedImageSize.W1792xH1024,
-            _ => GeneratedImageSize.W1024xH1024
+            _ => throw new ArgumentException($"Size '{value}' has no OpenAI Images equivalent.", nameof(size))
         };
     }
+
+    private GeneratedImageQuality ResolveQuality(ImageGenerationQuality? quality)
+    {
+        var value = quality ?? _capabilities.Qualities[0];
+        if (!_capabilities.Qualities.Contains(value))
+        {
+            throw new ArgumentException(
+                $"Model '{_model}' does not support quality '{value}'. Supported qualities: {string.Join(", ", _capabilities.Qualities)}.",
+                nameof(quality));
+        }
+
+        return value switch
+        {
+            ImageGenerationQuality.Auto => GeneratedImageQuality.Auto,
+            ImageGenerationQuality.Low => GeneratedImageQuality.LowQuality,
+            ImageGenerationQuality.Medium => GeneratedImageQuality.MediumQuality,
+            ImageGenerationQuality.High => GeneratedImageQuality.HighQuality,
+            ImageGenerationQuality.Hd => GeneratedImageQuality.High,
+            _ => GeneratedImageQuality.Standard
+        };
+    }
+
+    private static GeneratedImageStyle ResolveStyle(ImageGenerationStyle? style) =>
+        style is ImageGenerationStyle.Natural ? GeneratedImageStyle.Natural : GeneratedImageStyle.Vivid;
 }
+
+#pragma warning restore OPENAI001

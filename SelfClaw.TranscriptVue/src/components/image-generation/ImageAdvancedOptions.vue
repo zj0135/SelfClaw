@@ -1,10 +1,13 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 import { ChevronDown } from 'lucide-vue-next';
+import { QUALITY_LABELS, STYLE_LABELS } from '../../renderers/imageStudio.js';
 
-defineProps({
-	quality: { type: String, default: 'standard' },
-	styleVal: { type: String, default: 'vivid' },
+const props = defineProps({
+	qualities: { type: Array, default: () => [] },
+	styles: { type: Array, default: () => [] },
+	quality: { type: String, default: '' },
+	styleVal: { type: String, default: '' },
 });
 
 const emit = defineEmits([
@@ -14,61 +17,51 @@ const emit = defineEmits([
 
 const isExpanded = ref(false);
 
-function toggle() {
-	isExpanded.value = !isExpanded.value;
-}
+// 两个控件都由模型能力决定：gpt-image-1 没有 style，dall-e-3 没有 low/medium/high。
+// 两边都空就不渲染整块「高级设置」，免得给用户一组点不动的开关。
+const hasQualities = computed(() => props.qualities.length > 1);
+const hasStyles = computed(() => props.styles.length > 1);
+const isVisible = computed(() => hasQualities.value || hasStyles.value);
 </script>
 
 <template>
-	<div class="advanced-wrapper">
-		<button type="button" class="advanced-toggle" @click="toggle">
+	<div v-if="isVisible" class="advanced-wrapper">
+		<button type="button" class="advanced-toggle" :aria-expanded="isExpanded" @click="isExpanded = !isExpanded">
 			<span class="toggle-text">高级设置</span>
 			<ChevronDown :size="15" class="toggle-arrow" :class="{ rotated: isExpanded }" />
 		</button>
 
 		<div v-if="isExpanded" class="advanced-body">
-			<!-- 画质选项 -->
-			<div class="opt-row">
+			<div v-if="hasQualities" class="opt-row">
 				<span class="opt-label">画质档位</span>
 				<div class="segmented-control">
 					<button
+						v-for="value in qualities"
+						:key="value"
 						type="button"
 						class="seg-btn"
-						:class="{ active: quality === 'standard' }"
-						@click="emit('update:quality', 'standard')"
+						:class="{ active: quality === value }"
+						:aria-pressed="quality === value"
+						@click="emit('update:quality', value)"
 					>
-						标准 (Standard)
-					</button>
-					<button
-						type="button"
-						class="seg-btn"
-						:class="{ active: quality === 'hd' }"
-						@click="emit('update:quality', 'hd')"
-					>
-						高清 (HD)
+						{{ QUALITY_LABELS[value] || value }}
 					</button>
 				</div>
 			</div>
 
-			<!-- 风格选项 -->
-			<div class="opt-row">
+			<div v-if="hasStyles" class="opt-row">
 				<span class="opt-label">生成风格</span>
 				<div class="segmented-control">
 					<button
+						v-for="value in styles"
+						:key="value"
 						type="button"
 						class="seg-btn"
-						:class="{ active: styleVal === 'vivid' }"
-						@click="emit('update:styleVal', 'vivid')"
+						:class="{ active: styleVal === value }"
+						:aria-pressed="styleVal === value"
+						@click="emit('update:styleVal', value)"
 					>
-						生动 (Vivid)
-					</button>
-					<button
-						type="button"
-						class="seg-btn"
-						:class="{ active: styleVal === 'natural' }"
-						@click="emit('update:styleVal', 'natural')"
-					>
-						自然 (Natural)
+						{{ STYLE_LABELS[value] || value }}
 					</button>
 				</div>
 			</div>
@@ -132,16 +125,21 @@ function toggle() {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	gap: 12px;
 }
 
 .opt-label {
 	font-size: 12px;
 	color: var(--ink-3, #6b7280);
 	font-weight: 500;
+	flex-shrink: 0;
 }
 
 .segmented-control {
 	display: inline-flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 2px;
 	background: var(--surface-muted, #f1f3f6);
 	padding: 2px;
 	border-radius: 8px;

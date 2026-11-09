@@ -256,6 +256,31 @@ public sealed class AiProviderSettingsServiceTests
     }
 
     [Fact]
+    public async Task Image_generation_models_are_never_offered_as_chat_models()
+    {
+        var repository = new InMemoryAiProviderRepository();
+        var protector = new FakeSecretProtector();
+        var connection = CreateConnection("openai", AiProviderKind.OpenAI, "OpenAI");
+        repository.Connections[connection.Id] = connection;
+        var chatModel = CreateProfile(connection.Id, "gpt-5", enabled: true);
+        // The adapter speaks OpenAIImages, so only the chat-format gate can keep it out of the picker
+        // and out of the turn preflight.
+        var imageModel = CreateProfile(connection.Id, "gpt-image-1", enabled: true) with
+        {
+            ApiFormat = AiProviderApiFormat.OpenAIImages
+        };
+        repository.Models[chatModel.Id] = chatModel;
+        repository.Models[imageModel.Id] = imageModel;
+        var service = CreateService(repository, protector, new FakeAiProviderAdapter(AiProviderKind.OpenAI));
+
+        var enabledViews = await service.ListEnabledModelsAsync();
+
+        enabledViews.Should().ContainSingle().Which.ModelProfileId.Should().Be(chatModel.Id);
+        (await service.IsModelAvailableAsync(imageModel.Id)).Should().BeFalse();
+        (await service.IsModelAvailableAsync(chatModel.Id)).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task Multimodal_support_requires_the_model_to_be_available_as_well()
     {
         var repository = new InMemoryAiProviderRepository();
