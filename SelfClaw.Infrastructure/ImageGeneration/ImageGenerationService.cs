@@ -20,8 +20,8 @@ namespace SelfClaw.Infrastructure.ImageGeneration;
 internal sealed class ImageGenerationService : IImageGenerationService
 {
     /// <summary>
-    /// Image rendering is one long request, not a token stream: a 1792x1024 dall-e-3 render routinely
-    /// passes the 100s chat timeout and gpt-image-1 is slower still. The ceiling is enforced through the
+    /// Image rendering is one long request, not a token stream: a 1536x1024 gpt-image render routinely
+    /// passes the 100s chat timeout. The ceiling is enforced through the
     /// linked token so expiry aborts the socket read instead of merely abandoning the await.
     /// </summary>
     private static readonly TimeSpan RequestTimeout = TimeSpan.FromMinutes(5);
@@ -71,6 +71,14 @@ internal sealed class ImageGenerationService : IImageGenerationService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(model);
         return OpenAiImageModelCapabilities.Resolve(model);
+    }
+
+    public async Task<ImageGenerationModelCapabilities> GetCapabilitiesForProfileAsync(
+        Guid? modelProfileId,
+        CancellationToken cancellationToken = default)
+    {
+        var profile = await ResolveProfileAsync(modelProfileId, cancellationToken).ConfigureAwait(false);
+        return OpenAiImageModelCapabilities.Resolve(profile.Model);
     }
 
     private async Task<ImageGenerationResult> ExecuteAsync(

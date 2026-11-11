@@ -1,18 +1,15 @@
 <script setup>
-import { ref } from 'vue';
-import { ChevronDown, ChevronUp } from 'lucide-vue-next';
-import { COMMON_TAGS, EXTENDED_TAGS } from '../../renderers/imageStudio.js';
+import { computed } from 'vue';
+import { DEFAULT_MAX_PROMPT_LENGTH } from '../../renderers/imageStudio.js';
 
-defineProps({
+const props = defineProps({
 	prompt: { type: String, default: '' },
+	maxPromptLength: { type: Number, default: DEFAULT_MAX_PROMPT_LENGTH },
 });
 
-const emit = defineEmits([
-	'update:prompt',
-	'append-tag',
-]);
+const emit = defineEmits(['update:prompt']);
 
-const showMoreTags = ref(false);
+const limit = computed(() => Math.max(1, props.maxPromptLength || DEFAULT_MAX_PROMPT_LENGTH));
 </script>
 
 <template>
@@ -23,46 +20,13 @@ const showMoreTags = ref(false);
 				<textarea
 					id="studio-prompt-input"
 					:value="prompt"
-					rows="3"
-					maxlength="1000"
+					rows="9"
+					:maxlength="limit"
 					placeholder="请输入你想生成的图片描述..."
 					class="custom-textarea"
 					@input="emit('update:prompt', $event.target.value)"
 				></textarea>
-				<span class="char-count">{{ prompt.length }} / 1000</span>
-			</div>
-		</div>
-
-		<!-- 常用标签 -->
-		<div class="tags-block">
-			<span class="tags-label">常用标签</span>
-			<div class="tags-flow">
-				<button
-					v-for="tag in COMMON_TAGS"
-					:key="tag"
-					type="button"
-					class="tag-pill"
-					@click="emit('append-tag', tag)"
-				>
-					{{ tag }}
-				</button>
-
-				<button type="button" class="tag-pill more-btn" @click="showMoreTags = !showMoreTags">
-					<span>{{ showMoreTags ? '收起' : '更多' }}</span>
-					<component :is="showMoreTags ? ChevronUp : ChevronDown" :size="12" />
-				</button>
-			</div>
-
-			<div v-if="showMoreTags" class="tags-flow extended">
-				<button
-					v-for="tag in EXTENDED_TAGS"
-					:key="tag"
-					type="button"
-					class="tag-pill ext-pill"
-					@click="emit('append-tag', tag)"
-				>
-					{{ tag }}
-				</button>
+				<span class="char-count">{{ prompt.length }} / {{ limit }}</span>
 			</div>
 		</div>
 	</div>
@@ -72,7 +36,6 @@ const showMoreTags = ref(false);
 .prompt-section {
 	display: flex;
 	flex-direction: column;
-	gap: 14px;
 	width: 100%;
 }
 
@@ -103,7 +66,9 @@ const showMoreTags = ref(false);
 }
 
 .custom-textarea {
+	display: block;
 	width: 100%;
+	min-height: 162px;
 	border: none;
 	outline: none;
 	background: transparent;
@@ -111,7 +76,7 @@ const showMoreTags = ref(false);
 	font-size: 13px;
 	line-height: 1.5;
 	color: var(--ink-1, #171a1f);
-	resize: none;
+	resize: vertical;
 }
 
 .custom-textarea::placeholder {
@@ -120,70 +85,12 @@ const showMoreTags = ref(false);
 
 .char-count {
 	position: absolute;
-	right: 12px;
+	right: 20px;
 	bottom: 6px;
 	font-size: 11px;
 	color: var(--ink-4, #8a929e);
 	font-variant-numeric: tabular-nums;
 	user-select: none;
-}
-
-.tags-block {
-	display: flex;
-	flex-direction: column;
-	gap: 8px;
-}
-
-.tags-label {
-	font-size: 12px;
-	font-weight: 500;
-	color: var(--ink-3, #6b7280);
-}
-
-.tags-flow {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-}
-
-.tags-flow.extended {
-	padding-top: 4px;
-	border-top: 1px dashed var(--line-1, rgba(0, 0, 0, 0.06));
-}
-
-.tag-pill {
-	display: inline-flex;
-	align-items: center;
-	gap: 3px;
-	padding: 4px 10px;
-	background: var(--surface-soft, #f7f8fa);
-	border: 1px solid var(--line-1, rgba(0, 0, 0, 0.06));
-	border-radius: 6px;
-	font-size: 12px;
-	color: var(--ink-2, #454c59);
-	cursor: pointer;
-	transition: all 0.15s ease;
-	user-select: none;
-}
-
-.tag-pill:hover {
-	background: color-mix(in srgb, var(--accent-base, #3b5bfd) 8%, var(--surface-soft, #f7f8fa));
-	border-color: var(--accent-base, #3b5bfd);
-	color: var(--accent-base, #3b5bfd);
-}
-
-.tag-pill.more-btn {
-	background: transparent;
-	color: var(--ink-3, #6b7280);
-	border-style: dashed;
-}
-
-.tag-pill.more-btn:hover {
-	color: var(--accent-base, #3b5bfd);
-	border-color: var(--accent-base, #3b5bfd);
-}
-
-.tag-pill.ext-pill {
-	background: var(--surface-muted, #f1f3f6);
+	pointer-events: none;
 }
 </style>

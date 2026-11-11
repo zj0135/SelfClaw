@@ -10,4 +10,8 @@ public sealed record ImageGenerationRequest(
     int Count = 1,
     string? Size = null,
     ImageGenerationQuality? Quality = null,
-    ImageGenerationStyle? Style = null);
+    ImageGenerationStyle? Style = null,
+    ImageGenerationBackground? Background = null,
+    ImageGenerationOutputFormat? OutputFormat = null,
+    int? OutputCompression = null,
+    ImageGenerationModeration? Moderation = null);

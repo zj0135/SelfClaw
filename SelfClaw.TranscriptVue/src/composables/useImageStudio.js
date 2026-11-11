@@ -1,8 +1,8 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useHostBridge } from './hostBridge.js';
-import { describeSizes } from '../renderers/imageStudio.js';
+import { describeSizes, validateCustomSize, DEFAULT_MAX_PROMPT_LENGTH } from '../renderers/imageStudio.js';
 
-// 生图是单次长请求，不是流式回合：默认 30 秒的请求超时对 1792×1024 的渲染根本不够，
+// 生图是单次长请求，不是流式回合：默认 30 秒的请求超时对 1536×1024 的渲染根本不够，
 // 超时只会让前端先放弃、后端继续烧钱。这里给足分钟级预算，并把取消按钮的 jobId 一起送下去。
 const IMAGE_REQUEST_TIMEOUT_MS = 6 * 60 * 1000;
 const GALLERY_STORAGE_KEY = 'selfclaw:image-studio:gallery';
@@ -28,6 +28,11 @@ function storeGallery(items) {
 	}
 }
 
+// 能力数组的首项即该模型的默认值；能力缺失时返回空串，宿主会按模型默认值补齐。
+function defaultOf(list) {
+	return Array.isArray(list) && list.length ? list[0] : '';
+}
+
 export function useImageStudio() {
 	const { request, post } = useHostBridge();
 
@@ -36,9 +41,16 @@ export function useImageStudio() {
 	const selectedModelProfileId = ref('');
 	const prompt = ref('');
 	const selectedSize = ref('');
+	const customWidth = ref(1024);
+	const customHeight = ref(1024);
+	const customSizeError = ref('');
 	const count = ref(1);
 	const quality = ref('');
 	const style = ref('');
+	const background = ref('');
+	const outputFormat = ref('');
+	const outputCompression = ref(80);
+	const moderation = ref('');
 	const referenceImage = ref(null); // { base64, name, url }
 	const isGenerating = ref(false);
 	const cancelling = ref(false);
@@ -57,7 +69,13 @@ export function useImageStudio() {
 	const sizeOptions = computed(() => describeSizes(capabilities.value?.sizes));
 	const qualityOptions = computed(() => capabilities.value?.qualities || []);
 	const styleOptions = computed(() => capabilities.value?.styles || []);
+	const backgroundOptions = computed(() => capabilities.value?.backgrounds || []);
+	const outputFormatOptions = computed(() => capabilities.value?.outputFormats || []);
+	const moderationOptions = computed(() => capabilities.value?.moderations || []);
+	const supportsOutputCompression = computed(() => Boolean(capabilities.value?.supportsOutputCompression));
+	const customSizeRules = computed(() => capabilities.value?.customSize || null);
 	const maxCount = computed(() => capabilities.value?.maxCount || 1);
+	const maxPromptLength = computed(() => capabilities.value?.maxPromptLength || DEFAULT_MAX_PROMPT_LENGTH);
 
 	const currentSize = computed(() => {
 		const found = sizeOptions.value.find((option) => option.value === selectedSize.value);
@@ -66,21 +84,52 @@ export function useImageStudio() {
 
 	const currentQuality = computed(() => {
 		const found = qualityOptions.value.find((value) => value === quality.value);
-		return found || qualityOptions.value[0] || '';
+		return found || defaultOf(qualityOptions.value);
 	});
 
 	const currentStyle = computed(() => {
 		const found = styleOptions.value.find((value) => value === style.value);
-		return found || styleOptions.value[0] || '';
+		return found || defaultOf(styleOptions.value);
 	});
 
-	// 换模型会让原来的尺寸/画质/风格/数量变成非法组合（dall-e-3 只有 1 张、gpt-image-1 没有 style），
+	const currentBackground = computed(() => {
+		const found = backgroundOptions.value.find((value) => value === background.value);
+		return found || defaultOf(backgroundOptions.value);
+	});
+
+	const currentOutputFormat = computed(() => {
+		const found = outputFormatOptions.value.find((value) => value === outputFormat.value);
+		return found || defaultOf(outputFormatOptions.value);
+	});
+
+	const currentModeration = computed(() => {
+		const found = moderationOptions.value.find((value) => value === moderation.value);
+		return found || defaultOf(moderationOptions.value);
+	});
+
+	// 换模型会让原来的尺寸/画质/风格/数量变成非法组合（例如切到不带 style 的模型），
 	// 所以模型一变就地把选择收敛回新模型的能力范围，避免下一次点击必然 400。
 	watch(currentModel, () => {
-		selectedSize.value = sizeOptions.value[0]?.value || '';
-		quality.value = qualityOptions.value[0] || '';
-		style.value = styleOptions.value[0] || '';
+		selectedSize.value = defaultOf(sizeOptions.value.map((option) => option.value));
+		quality.value = defaultOf(qualityOptions.value);
+		style.value = defaultOf(styleOptions.value);
+		background.value = defaultOf(backgroundOptions.value);
+		outputFormat.value = defaultOf(outputFormatOptions.value);
+		moderation.value = defaultOf(moderationOptions.value);
 		count.value = Math.min(count.value, maxCount.value);
+		customSizeError.value = '';
+		// 上限可能变小，超出部分直接裁掉，不能让宿主在提交时才报错。
+		if (prompt.value.length > maxPromptLength.value) {
+			prompt.value = prompt.value.slice(0, maxPromptLength.value);
+		}
+	});
+
+	// JPEG 没有 alpha 通道：背景切到透明时把输出格式收敛回 png，
+	// 与 ImageAdvancedOptions 里摘掉 jpeg 选项、以及宿主的二次校验保持一致。
+	watch(background, (value) => {
+		if (value === 'transparent' && outputFormat.value === 'jpeg') {
+			outputFormat.value = 'png';
+		}
 	});
 
 	function persistGallery() {
@@ -112,22 +161,19 @@ export function useImageStudio() {
 		}
 	}
 
-	function appendTag(tag) {
-		if (!tag) return;
-		const current = prompt.value.trim();
-		if (!current) {
-			prompt.value = tag;
-		} else if (!current.includes(tag)) {
-			prompt.value = `${current}, ${tag}`;
-		}
-	}
-
 	function resetParams() {
 		prompt.value = '';
-		selectedSize.value = sizeOptions.value[0]?.value || '';
+		selectedSize.value = defaultOf(sizeOptions.value.map((option) => option.value));
+		customWidth.value = 1024;
+		customHeight.value = 1024;
+		customSizeError.value = '';
 		count.value = 1;
-		quality.value = qualityOptions.value[0] || '';
-		style.value = styleOptions.value[0] || '';
+		quality.value = defaultOf(qualityOptions.value);
+		style.value = defaultOf(styleOptions.value);
+		background.value = defaultOf(backgroundOptions.value);
+		outputFormat.value = defaultOf(outputFormatOptions.value);
+		outputCompression.value = 80;
+		moderation.value = defaultOf(moderationOptions.value);
 		referenceImage.value = null;
 		zoomLevel.value = 100;
 		errorMessage.value = '';
@@ -211,6 +257,21 @@ export function useImageStudio() {
 			return;
 		}
 
+		if (promptText.length > maxPromptLength.value) {
+			errorMessage.value = `提示词不能超过 ${maxPromptLength.value} 字符`;
+			return;
+		}
+
+		// 自定义尺寸由前端先校验一遍，宿主仍会按同一规则再校验（不信任渲染层）。
+		if (customSizeRules.value && selectedSize.value === 'custom') {
+			const invalid = validateCustomSize(customWidth.value, customHeight.value, customSizeRules.value);
+			if (invalid) {
+				customSizeError.value = invalid;
+				return;
+			}
+		}
+		customSizeError.value = '';
+
 		errorMessage.value = '';
 		statusMessage.value = '正在生成图片...';
 		isGenerating.value = true;
@@ -218,23 +279,36 @@ export function useImageStudio() {
 		activeJobId.value = `image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 		try {
+			const resolvedSize = customSizeRules.value && selectedSize.value === 'custom'
+				? `${customWidth.value}x${customHeight.value}`
+				: currentSize.value?.value;
 			const payload = {
 				jobId: activeJobId.value,
 				prompt: promptText,
 				modelProfileId: selectedModelProfileId.value || undefined,
 				count: Math.min(count.value, maxCount.value),
-				size: currentSize.value?.value,
+				size: resolvedSize,
+				quality: currentQuality.value || undefined,
+				style: currentStyle.value || undefined,
+				background: currentBackground.value || undefined,
+				outputFormat: currentOutputFormat.value || undefined,
+				outputCompression: supportsOutputCompression.value
+					&& currentOutputFormat.value
+					&& currentOutputFormat.value !== 'png'
+					? outputCompression.value
+					: undefined,
+				moderation: currentModeration.value || undefined,
 			};
 
 			const response = referenceImage.value?.base64
 				? await request(
 					'image-generation/edit',
-					{ ...payload, imageBase64: referenceImage.value.base64 },
+					{ ...payload, imageBase64: referenceImage.value.base64, style: undefined, moderation: undefined },
 					{ timeout: IMAGE_REQUEST_TIMEOUT_MS },
 				)
 				: await request(
 					'image-generation/generate',
-					{ ...payload, quality: currentQuality.value, style: currentStyle.value || undefined },
+					payload,
 					{ timeout: IMAGE_REQUEST_TIMEOUT_MS },
 				);
 
@@ -274,12 +348,25 @@ export function useImageStudio() {
 		sizeOptions,
 		qualityOptions,
 		styleOptions,
+		backgroundOptions,
+		outputFormatOptions,
+		moderationOptions,
+		supportsOutputCompression,
+		customSizeRules,
 		maxCount,
+		maxPromptLength,
 		prompt,
 		selectedSize,
+		customWidth,
+		customHeight,
+		customSizeError,
 		count,
 		quality,
 		style,
+		background,
+		outputFormat,
+		outputCompression,
+		moderation,
 		referenceImage,
 		isGenerating,
 		cancelling,
@@ -288,7 +375,6 @@ export function useImageStudio() {
 		statusMessage,
 		errorMessage,
 		loadModels,
-		appendTag,
 		resetParams,
 		removeImage,
 		clearGallery,

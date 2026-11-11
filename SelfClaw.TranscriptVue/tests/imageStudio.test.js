@@ -1,37 +1,70 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mount } from '@vue/test-utils';
 import { defineComponent, h } from 'vue';
-import { describeSize, describeSizes, formatGeneratedAt } from '../src/renderers/imageStudio.js';
+import {
+	describeSize,
+	describeSizes,
+	validateCustomSize,
+	formatGeneratedAt,
+	DEFAULT_MAX_PROMPT_LENGTH,
+} from '../src/renderers/imageStudio.js';
 
 const posted = [];
 let deliver;
 let wrapper;
 
+const GPT_SIZES = [
+	'auto', '1024x1024', '1536x1024', '1024x1536',
+	'1536x864', '864x1536', '1024x768', '768x1024', '1536x768', '768x1536',
+];
+
+const CUSTOM_SIZE_RULES = {
+	multipleOf: 16,
+	minAspectRatio: 1,
+	maxAspectRatio: 3,
+	maxWidth: 3840,
+	maxHeight: 2160,
+};
+
+// 主路径：gpt-image 家族的增强能力集（整个家族统一，不按 2.5/2.6 细分）。
 const MODEL = {
 	profileId: 'profile-1',
 	providerName: 'OpenAI',
-	name: 'DALL·E 3',
-	model: 'dall-e-3',
-	description: '高质量生图模型',
+	name: 'GPT Image 2.6 Sunburst',
+	model: 'gpt-image-2.6-sunburst',
+	description: 'GPT Image 家族生图模型',
 	capabilities: {
-		sizes: ['1024x1024', '1024x1792', '1792x1024'],
-		qualities: ['standard', 'hd'],
-		styles: ['vivid', 'natural'],
-		maxCount: 1,
+		sizes: GPT_SIZES,
+		qualities: ['auto', 'low', 'medium', 'high', 'xhigh', 'max'],
+		styles: [],
+		maxCount: 10,
+		maxPromptLength: 32000,
+		backgrounds: ['auto', 'transparent', 'opaque'],
+		outputFormats: ['png', 'jpeg', 'webp'],
+		moderations: ['auto', 'low'],
+		supportsOutputCompression: true,
+		customSize: CUSTOM_SIZE_RULES,
 	},
 };
 
-const GPT_MODEL = {
+// 网关兜底：未识别的模型 id 由宿主下发保守的旧参数集，prompt 上限默认 1000。
+const GATEWAY_MODEL = {
 	profileId: 'profile-2',
-	providerName: 'OpenAI',
-	name: 'GPT Image 1',
-	model: 'gpt-image-1',
-	description: '新一代生图模型',
+	providerName: 'Gateway',
+	name: 'Legacy Image Gateway',
+	model: 'acme/legacy-image',
+	description: '第三方生图网关',
 	capabilities: {
-		sizes: ['1024x1024', '1024x1536', '1536x1024'],
-		qualities: ['auto', 'low', 'medium', 'high'],
-		styles: [],
+		sizes: ['1024x1024', '1024x1536', '1536x1024', '1024x1792', '1792x1024', '512x512', '256x256'],
+		qualities: ['auto', 'low', 'medium', 'high', 'standard', 'hd'],
+		styles: ['vivid', 'natural'],
 		maxCount: 10,
+		maxPromptLength: DEFAULT_MAX_PROMPT_LENGTH,
+		backgrounds: [],
+		outputFormats: [],
+		moderations: [],
+		supportsOutputCompression: false,
+		customSize: null,
 	},
 };
 
@@ -113,58 +146,75 @@ describe('useImageStudio', () => {
 		const studio = await mountStudio([MODEL]);
 
 		expect(studio.sizeOptions.value.map((option) => option.value))
-			.toEqual(['1024x1024', '1024x1792', '1792x1024']);
-		expect(studio.qualityOptions.value).toEqual(['standard', 'hd']);
-		expect(studio.styleOptions.value).toEqual(['vivid', 'natural']);
-		expect(studio.maxCount.value).toBe(1);
-		expect(studio.selectedSize.value).toBe('1024x1024');
-		expect(studio.quality.value).toBe('standard');
-		expect(studio.style.value).toBe('vivid');
+			.toEqual(GPT_SIZES);
+		expect(studio.qualityOptions.value).toEqual(['auto', 'low', 'medium', 'high', 'xhigh', 'max']);
+		expect(studio.styleOptions.value).toEqual([]);
+		expect(studio.backgroundOptions.value).toEqual(['auto', 'transparent', 'opaque']);
+		expect(studio.outputFormatOptions.value).toEqual(['png', 'jpeg', 'webp']);
+		expect(studio.moderationOptions.value).toEqual(['auto', 'low']);
+		expect(studio.supportsOutputCompression.value).toBe(true);
+		expect(studio.customSizeRules.value).toEqual(CUSTOM_SIZE_RULES);
+		expect(studio.maxPromptLength.value).toBe(32000);
+		expect(studio.maxCount.value).toBe(10);
+		expect(studio.selectedSize.value).toBe('auto');
+		expect(studio.quality.value).toBe('auto');
+		expect(studio.style.value).toBe('');
+		expect(studio.background.value).toBe('auto');
+		expect(studio.outputFormat.value).toBe('png');
+		expect(studio.moderation.value).toBe('auto');
 	});
 
 	it('re-clamps the knobs when switching to a model with different capabilities', async () => {
-		const studio = await mountStudio([MODEL, GPT_MODEL]);
+		const studio = await mountStudio([MODEL, GATEWAY_MODEL]);
+
+		studio.selectedSize.value = '1536x1024';
+		studio.quality.value = 'high';
+		studio.count.value = 4;
+
+		studio.selectedModelProfileId.value = GATEWAY_MODEL.profileId;
+		await settle();
+
+		// 收敛回新模型能力集的首项，且 style 从无到有也要拿到默认值。
+		expect(studio.selectedSize.value).toBe('1024x1024');
+		expect(studio.quality.value).toBe('auto');
+		expect(studio.style.value).toBe('vivid');
+		expect(studio.styleOptions.value).toEqual(['vivid', 'natural']);
+		expect(studio.maxCount.value).toBe(10);
 
 		studio.selectedSize.value = '1792x1024';
 		studio.quality.value = 'hd';
 		studio.style.value = 'natural';
-		studio.count.value = 1;
 
-		studio.selectedModelProfileId.value = GPT_MODEL.profileId;
+		studio.selectedModelProfileId.value = MODEL.profileId;
 		await settle();
 
-		expect(studio.selectedSize.value).toBe('1024x1024');
+		// 切回 gpt-image：1792x1024 / hd / natural 全部失效，风格控件整体消失，
+		// 且新维度重新拿到默认值。
+		expect(studio.selectedSize.value).toBe('auto');
 		expect(studio.quality.value).toBe('auto');
 		expect(studio.style.value).toBe('');
-		expect(studio.maxCount.value).toBe(10);
-	});
-
-	it('appends tags with comma separation and ignores duplicates', async () => {
-		const studio = await mountStudio();
-
-		studio.appendTag('写实');
-		expect(studio.prompt.value).toBe('写实');
-
-		studio.appendTag('二次元');
-		expect(studio.prompt.value).toBe('写实, 二次元');
-
-		studio.appendTag('写实');
-		expect(studio.prompt.value).toBe('写实, 二次元');
+		expect(studio.background.value).toBe('auto');
+		expect(studio.outputFormat.value).toBe('png');
+		expect(studio.supportsOutputCompression.value).toBe(true);
+		expect(studio.customSizeRules.value).toEqual(CUSTOM_SIZE_RULES);
+		expect(studio.maxPromptLength.value).toBe(32000);
+		expect(studio.sizeOptions.value.map((option) => option.value))
+			.toEqual(GPT_SIZES);
 	});
 
 	it('resets parameters back to the model defaults', async () => {
 		const studio = await mountStudio([MODEL]);
 
 		studio.prompt.value = 'a futuristic city';
-		studio.selectedSize.value = '1792x1024';
-		studio.quality.value = 'hd';
+		studio.selectedSize.value = '1536x1024';
+		studio.quality.value = 'high';
 		studio.setZoom(50);
 
 		studio.resetParams();
 
 		expect(studio.prompt.value).toBe('');
-		expect(studio.selectedSize.value).toBe('1024x1024');
-		expect(studio.quality.value).toBe('standard');
+		expect(studio.selectedSize.value).toBe('auto');
+		expect(studio.quality.value).toBe('auto');
 		expect(studio.zoomLevel.value).toBe(100);
 	});
 
@@ -179,9 +229,14 @@ describe('useImageStudio', () => {
 		const request = lastRequest('image-generation/generate');
 		expect(request).toBeTruthy();
 		expect(request.prompt).toBe('a cat');
-		expect(request.size).toBe('1024x1024');
-		expect(request.quality).toBe('standard');
-		expect(request.style).toBe('vivid');
+		expect(request.size).toBe('auto');
+		expect(request.quality).toBe('auto');
+		expect(request.background).toBe('auto');
+		expect(request.outputFormat).toBe('png');
+		expect(request.moderation).toBe('auto');
+		// png 不产生 output_compression；能力里 styles 为空时 style 也不应出现在 payload 中。
+		expect(request.outputCompression).toBeUndefined();
+		expect(request.style).toBeUndefined();
 		expect(request.modelProfileId).toBe(MODEL.profileId);
 		expect(request.jobId).toMatch(/^image-/);
 		// 模型 id 由宿主按 profile 决定，渲染层不再二次指定。
@@ -273,9 +328,119 @@ describe('useImageStudio', () => {
 		expect(lastRequest('image-generation/generate')).toBeUndefined();
 		expect(studio.errorMessage.value).toContain('尚未配置生图模型');
 	});
+
+	it('takes the prompt limit from capabilities and falls back to 1000 for gateways', async () => {
+		const studio = await mountStudio([MODEL, GATEWAY_MODEL]);
+		expect(studio.maxPromptLength.value).toBe(32000);
+
+		studio.selectedModelProfileId.value = GATEWAY_MODEL.profileId;
+		await settle();
+		expect(studio.maxPromptLength.value).toBe(DEFAULT_MAX_PROMPT_LENGTH);
+	});
+
+	it('truncates a long prompt when switching to a model with a smaller limit', async () => {
+		const studio = await mountStudio([MODEL, GATEWAY_MODEL]);
+		studio.prompt.value = 'a'.repeat(2000);
+
+		studio.selectedModelProfileId.value = GATEWAY_MODEL.profileId;
+		await settle();
+
+		expect(studio.prompt.value).toHaveLength(1000);
+	});
+
+	it('blocks generation before dispatch when the prompt exceeds the current limit', async () => {
+		const studio = await mountStudio([GATEWAY_MODEL]);
+		studio.prompt.value = 'a'.repeat(1001);
+
+		await studio.generate();
+
+		expect(lastRequest('image-generation/generate')).toBeUndefined();
+		expect(studio.errorMessage.value).toContain('1000');
+	});
+
+	it('sends the enhanced knobs and only compresses non-png outputs', async () => {
+		const studio = await mountStudio([MODEL]);
+		studio.prompt.value = 'a cat';
+		studio.background.value = 'transparent';
+		studio.outputFormat.value = 'webp';
+		studio.outputCompression.value = 42;
+		studio.moderation.value = 'low';
+		studio.quality.value = 'xhigh';
+
+		const generating = studio.generate();
+		await settle();
+		const request = lastRequest('image-generation/generate');
+		expect(request.background).toBe('transparent');
+		expect(request.outputFormat).toBe('webp');
+		expect(request.outputCompression).toBe(42);
+		expect(request.moderation).toBe('low');
+		expect(request.quality).toBe('xhigh');
+
+		await respond(request, { ok: true, images: [] });
+		await generating;
+	});
+
+	it('encodes a validated custom size in the request', async () => {
+		const studio = await mountStudio([MODEL]);
+		studio.prompt.value = 'a cat';
+		studio.selectedSize.value = 'custom';
+		studio.customWidth.value = 3840;
+		studio.customHeight.value = 2160;
+
+		const generating = studio.generate();
+		await settle();
+		const request = lastRequest('image-generation/generate');
+		expect(request.size).toBe('3840x2160');
+
+		await respond(request, { ok: true, images: [] });
+		await generating;
+	});
+
+	it('refuses an invalid custom size before dispatching', async () => {
+		const studio = await mountStudio([MODEL]);
+		studio.prompt.value = 'a cat';
+		studio.selectedSize.value = 'custom';
+		studio.customWidth.value = 1000; // not a multiple of 16
+		studio.customHeight.value = 1024;
+
+		await studio.generate();
+
+		expect(lastRequest('image-generation/generate')).toBeUndefined();
+		expect(studio.customSizeError.value).toContain('16 的倍数');
+	});
+
+	it('switches jpeg back to png when the background becomes transparent', async () => {
+		const studio = await mountStudio([MODEL]);
+		studio.outputFormat.value = 'jpeg';
+		studio.background.value = 'transparent';
+		await settle();
+
+		expect(studio.outputFormat.value).toBe('png');
+	});
 });
 
 describe('imageStudio renderers', () => {
+	it('describes auto as a readable card', () => {
+		expect(describeSize('auto')).toMatchObject({ ratio: '自动', desc: '自动', isAuto: true });
+	});
+
+	it('labels the new aspect-ratio presets', () => {
+		expect(describeSize('1536x864')).toMatchObject({ ratio: '16:9', orientation: 'landscape' });
+		expect(describeSize('864x1536')).toMatchObject({ ratio: '9:16', orientation: 'portrait' });
+		expect(describeSize('1024x768')).toMatchObject({ ratio: '4:3', orientation: 'landscape' });
+		expect(describeSize('768x1024')).toMatchObject({ ratio: '3:4', orientation: 'portrait' });
+		expect(describeSize('1536x768')).toMatchObject({ ratio: '2:1' });
+		expect(describeSize('768x1536')).toMatchObject({ ratio: '1:2' });
+	});
+
+	it('validates custom sizes with the same rules as the host', () => {
+		expect(validateCustomSize(3840, 2160, CUSTOM_SIZE_RULES)).toBe('');
+		expect(validateCustomSize(1000, 1024, CUSTOM_SIZE_RULES)).toContain('16 的倍数');
+		expect(validateCustomSize(4096, 1024, CUSTOM_SIZE_RULES)).toContain('上限');
+		expect(validateCustomSize(512, 2048, CUSTOM_SIZE_RULES)).toContain('宽高比');
+		expect(validateCustomSize(1024, 1024, null)).toContain('不支持自定义尺寸');
+	});
+
 	it('turns a wire size into a readable ratio card', () => {
 		expect(describeSize('1024x1536')).toMatchObject({ ratio: '2:3', orientation: 'portrait', desc: '1024 × 1536' });
 		expect(describeSize('1792x1024')).toMatchObject({ ratio: '7:4', orientation: 'landscape' });

@@ -23,15 +23,28 @@ const {
 	models,
 	loadingModels,
 	selectedModelProfileId,
-	sizeOptions,
-	qualityOptions,
-	styleOptions,
-	maxCount,
-	prompt,
-	selectedSize,
-	count,
-	quality,
-	style,
+		sizeOptions,
+		qualityOptions,
+		styleOptions,
+		backgroundOptions,
+		outputFormatOptions,
+		moderationOptions,
+		supportsOutputCompression,
+		customSizeRules,
+		maxCount,
+		maxPromptLength,
+		prompt,
+		selectedSize,
+		customWidth,
+		customHeight,
+		customSizeError,
+		count,
+		quality,
+		style,
+		background,
+		outputFormat,
+		outputCompression,
+		moderation,
 	referenceImage,
 	isGenerating,
 	cancelling,
@@ -39,9 +52,8 @@ const {
 	gallery,
 	statusMessage,
 	errorMessage,
-	loadModels,
-	appendTag,
-	resetParams,
+		loadModels,
+		resetParams,
 	removeImage,
 	clearGallery,
 	setZoom,
@@ -122,29 +134,41 @@ onBeforeUnmount(() => {
 						@reload="loadModels"
 					/>
 
-					<ImagePromptSection
-						v-model:prompt="prompt"
-						@append-tag="appendTag"
-					/>
+						<ImagePromptSection
+							v-model:prompt="prompt"
+							:max-prompt-length="maxPromptLength"
+						/>
 
-					<ImageSizeSelector
-						v-if="sizeOptions.length"
-						:sizes="sizeOptions"
-						:selected="selectedSize"
-						@select-size="selectedSize = $event"
-					/>
+						<ImageSizeSelector
+							v-if="sizeOptions.length"
+							:sizes="sizeOptions"
+							:selected="selectedSize"
+							:custom-rules="customSizeRules"
+							v-model:custom-width="customWidth"
+							v-model:custom-height="customHeight"
+							:custom-error="customSizeError"
+							@select-size="selectedSize = $event"
+						/>
 
-					<ImageSliderControls
-						v-model:count="count"
-						:max-count="maxCount"
-					/>
+						<ImageSliderControls
+							v-model:count="count"
+							:max-count="maxCount"
+						/>
 
-					<ImageAdvancedOptions
-						v-model:quality="quality"
-						v-model:style-val="style"
-						:qualities="qualityOptions"
-						:styles="styleOptions"
-					/>
+						<ImageAdvancedOptions
+							v-model:quality="quality"
+							v-model:style-val="style"
+							v-model:background="background"
+							v-model:output-format="outputFormat"
+							v-model:output-compression="outputCompression"
+							v-model:moderation="moderation"
+							:qualities="qualityOptions"
+							:styles="styleOptions"
+							:backgrounds="backgroundOptions"
+							:output-formats="outputFormatOptions"
+							:moderations="moderationOptions"
+							:supports-output-compression="supportsOutputCompression"
+						/>
 				</div>
 
 				<div v-if="errorMessage" class="notice-bar error" role="alert">
@@ -288,10 +312,10 @@ onBeforeUnmount(() => {
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
-	padding: 20px;
+	padding: 18px 20px;
 	display: flex;
 	flex-direction: column;
-	gap: 18px;
+	gap: 14px;
 }
 
 .notice-bar {

@@ -140,7 +140,7 @@ public sealed class DesktopServiceRegistrationTests
                 await using var provider = services.BuildServiceProvider();
 
                 var imageService = provider.GetRequiredService<IImageGenerationService>();
-                imageService.GetModelCapabilities("dall-e-3").MaxCount.Should().Be(1);
+                imageService.GetModelCapabilities("gpt-image-2.5-flare").MaxCount.Should().Be(10);
                 provider.GetRequiredService<SelfClaw.Desktop.Services.ImageGeneration.ImageGenerationBridge>().Should().NotBeNull();
                 await Task.CompletedTask;
             }

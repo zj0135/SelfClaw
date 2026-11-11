@@ -7,7 +7,7 @@ OpenAI Images 协议（`AiProviderApiFormat.OpenAIImages`）在 SelfClaw 里的�
 
 | 层 | 文件 | 职责 |
 | --- | --- | --- |
-| Core | `Models/ImageGeneration/*`、`Interfaces/ImageGeneration/*` | 纯 DTO 与 3 个方法的契约 |
+| Core | `Models/ImageGeneration/*`、`Interfaces/ImageGeneration/*` | 纯 DTO 与 4 个方法的契约 |
 | Infrastructure | `ImageGeneration/ImageGenerationService` | 解析 profile → connection → 凭据，建 client，管超时 |
 | Infrastructure | `ImageGeneration/OpenAiImageGenerationClient` | 请求形状、按模型能力裁剪参数、结果映射 |
 | Infrastructure | `ImageGeneration/OpenAiImageModelCapabilities` | 模型 → 可接受参数集的唯一事实来源 |
@@ -20,36 +20,66 @@ OpenAI Images 协议（`AiProviderApiFormat.OpenAIImages`）在 SelfClaw 里的�
 
 ## 2. 能力协商：为什么不能一套参数打天下
 
-三个模型家族对同一组字段的要求互不相容：
+同一个 OpenAI Images 协议下，模型家族对同一组字段的要求并不一致，用一套写死的参数打天下必然 400。
+当前只精确识别 **`gpt-image` 家族**（含 `gpt-image-1`、`gpt-image-1-mini`、`gpt-image-1.5`、
+`gpt-image-2`/`2.5`/`2.6` 系列与 `chatgpt-image-latest` 等按 `Contains("gpt-image")` 命中的变体）。
+**整个家族统一一套增强能力**，不按 2.5 / 2.6 细分：文档里 2.5 系列专属的 `xhigh`/`max` 与自定义尺寸
+对全家族开放，代价是 2.6 上可能选到上游不认的档位，由上游的可读报错兜底。其他模型 id 一律视为
+第三方网关，走保守的旧参数集：
 
-| 字段 | dall-e-2 | dall-e-3 | gpt-image-1 |
-| --- | --- | --- | --- |
-| `size` | 256/512/1024 方图 | 1024²、1024×1792、1792×1024 | 1024²、1024×1536、1536×1024 |
-| `quality` | `standard` | `standard`、`hd` | `low`、`medium`、`high`、`auto` |
-| `style` | 不支持 | `vivid`、`natural` | 不支持 |
-| `response_format` | 支持 | 支持 | **不支持，传了直接 400** |
-| `n` | ≤10 | **只能 1** | ≤10 |
+| 字段 | `gpt-image` 家族 | 其他 id（网关兜底） |
+| --- | --- | --- |
+| `prompt` 上限 | **32000 字符** | **1000 字符**（`DefaultMaxPromptLength`） |
+| `size` | `auto` + 10 个预设（1:1 / 3:2 / 2:3 / 16:9 / 9:16 / 4:3 / 3:4 / 2:1 / 1:2），另允许自定义 `WIDTHxHEIGHT` | 7 个旧预设，无自定义 |
+| `quality` | `auto`、`low`、`medium`、`high`、`xhigh`、`max` | 6 档旧词汇全量 |
+| `style` | 不支持 | `vivid`、`natural` |
+| `background` | `auto`、`transparent`、`opaque` | 不支持（不下发控件） |
+| `output_format` | `png`、`jpeg`、`webp` | 不支持（不下发控件） |
+| `output_compression` | 0–100，仅 jpeg/webp 生效 | 不支持 |
+| `moderation` | `auto`、`low`（仅生成，编辑无此字段） | 不支持 |
+| `response_format` | **不支持，传了直接 400** | 从不发送（见下） |
+| `n` | ≤10 | ≤10 |
+
+自定义尺寸约束（`ImageGenerationCustomSizeRules.GptImage`）：宽高均为 **16 的倍数**、宽高比在
+**1:3 ~ 3:1** 之间、最高 **3840×2160**。前端与宿主用同一组规则各校验一次（宿主不信任渲染层），
+SDK 侧用 `new GeneratedImageSize(w, h)` 序列化成 `"WxH"`。
+
+`background=transparent` 需要带 alpha 的输出格式：前端在透明背景下摘掉 `jpeg` 选项并把残留的
+`jpeg` 收敛回 `png`，`OpenAiImageGenerationClient` 再独立校验一次，避免把必然 400 的组合发出去。
 
 所以：
 
-1. `OpenAiImageModelCapabilities.Resolve(model)` 按模型 id 返回可接受集合（含 `MaxCount`）。
-   未知 id 视为第三方网关，返回宽松超集 —— 猜窄会弄坏能用的网关，猜宽最多换来看得懂的报错。
+1. `OpenAiImageModelCapabilities.Resolve(model)` 按模型 id 返回可接受集合。命中 `gpt-image` 用增强集；
+   **未知 id 返回旧参数超集并禁用全部 GPT Image 专属旋钮** —— 猜窄会弄坏能用的网关，把 GPT 专属
+   字段发给任意网关也容易踩 400。要接回一个已移除的家族，只需在这里加一条分支和一份预设，前端无需改动。
 2. `ImageGenerationModelCapabilities` 随 `image-generation/list-models` 下发给渲染层，
-   尺寸/画质/风格/数量控件全部由它生成，换模型时就地收敛（见 `useImageStudio` 的 `watch`）。
+   尺寸/画质/风格/背景/输出/过滤/数量/**prompt 上限**控件全部由它生成，换模型时就地收敛
+   （见 `useImageStudio` 的 `watch`）。能力契约新增字段都是可选带默认值的，旧网关不填即为空数组/false/null。
 3. `OpenAiImageGenerationClient` 再校验一次：超范围抛可读的 `ArgumentException`/`ArgumentOutOfRangeException`，
-   而不是把非法组合发给上游换一个 400。
-4. `ImageGenerationQuality` 的取值是中立的线上词汇（`auto/low/medium/high/standard/hd`），
-   由客户端在边界翻译成 SDK 的 `GeneratedImageQuality`；不存在「`Hd` 恰好等于 dall-e-3 的 hd」这种隐式绑定。
+   而不是把非法组合发给上游换一个 400。预设尺寸与自定义尺寸共用 `WIDTHxHEIGHT` 解析 +
+   `new GeneratedImageSize(w, h)`，不再走固定常量的 switch（抓包确认 SDK 会原样序列化任意 `WxH`），
+   因此往能力表里加一个比例就是完整的端到端改动，无需再碰客户端。
+4. `ImageGenerationQuality` 的取值是中立的线上词汇超集（`auto/low/medium/high/standard/hd/xhigh/max`），
+   由客户端在边界翻译成 SDK 的 `GeneratedImageQuality`；`xhigh`/`max` 走 SDK 的可扩展字符串构造
+   （抓包确认序列化为 `quality: "xhigh"`）。某个模型实际接受哪一档由能力表决定，
+   不存在「枚举值恰好等于某模型的取值」这种隐式绑定。
 
-`response_format` 与 `style` **只在能力允许时赋值**：SDK 的 `ImageGenerationOptions` 里这两项为 null 时
-不会出现在报文体中（已用抓包验证）。这是 gpt-image-1 能跑通的前提。
+**报文字段的裁剪**：`style` 只在 `Styles.Count > 0` 时才赋值；背景/输出格式/压缩/moderation 只在
+能力清单允许时赋值；`response_format` 则**从不赋值**——SDK 的 `ImageGenerationOptions` 里该项为 null
+时不会出现在报文体中（已用抓包验证），工作台始终只收字节。这是 `gpt-image` 家族能跑通的前提。
+
+**prompt 上限不下放到前端硬编码**：`ImagePromptSection` 的 `maxlength` 和字数计数都取
+`capabilities.maxPromptLength`，切到网关模型时自动变回 1000 并裁掉超长文本。宿主
+`ImageGenerationBridge` 提交前用 `IImageGenerationService.GetCapabilitiesForProfileAsync(profileId)`
+解析**同一次请求真正会用的 profile** 再校验，保证「按 A 的能力校验、实际用 B 执行」不会漂移；
+未带 profileId 时该接口复用 `ResolveProfileAsync` 的默认选择逻辑。
 
 ## 3. 长请求：超时与取消
 
 生图是单次长请求，不是 token 流。
 
 - **前端**：`useImageStudio` 对 generate/edit 显式传 `timeout: 6 分钟`。`hostBridge` 默认 30 秒对
-  1792×1024 的渲染根本不够；超时只会让前端先放弃、后端继续烧钱，用户看不到结果也无法重试出结果。
+  1536×1024 的渲染根本不够；超时只会让前端先放弃、后端继续烧钱，用户看不到结果也无法重试出结果。
 - **后端**：`ImageGenerationService.ExecuteAsync` 用 `CancellationTokenSource.CreateLinkedTokenSource`
   + `CancelAfter(5 分钟)`，超时走 `TimeoutException` → 中文提示；**调用方取消仍原样抛
   `OperationCanceledException`**（`AGENTS.md` 代码约定 6），两者用
@@ -79,7 +109,10 @@ OpenAI Images 协议（`AiProviderApiFormat.OpenAIImages`）在 SelfClaw 里的�
 
 - base64 长度在解码前按 `AttachmentPathResolver.MaximumByteLength`（10 MB）预检；
 - `Convert.FromBase64String` 的 `FormatException` 转成中文提示；
-- `prompt` 上限 4000 字符、`count` 限定 1–10（再按模型 `MaxCount` 收敛）；
+- `prompt` 上限**按所选模型能力动态取值**（GPT Image 32000 / 网关 1000），不再是固定 4000；
+  超限提示里带具体上限数字；
+- `count` 限定 1–10（再按模型 `MaxCount` 收敛）、`size` 限 32 字符（自定义尺寸最长 `"3840x2160"`）；
+- 枚举参数走 `ReadOptionalEnum`，非法取值在宿主侧拒绝，不交给 SDK 猜；
 - 未知子类型抛 `ArgumentException`（与其他 bridge 一致），不再返回一个假的 error 对象；
 - 错误分级：用户输入/配置类问题记 `LogWarning` 并原样回中文；未预期异常记 `LogError` 并加中文前缀。
 
@@ -104,3 +137,12 @@ OpenAI Images 协议（`AiProviderApiFormat.OpenAIImages`）在 SelfClaw 里的�
   等于死代码，等真有入口时再加。
 - **`response_format=url`**：字节模式是唯一需要的形状（要落盘）。若网关无视请求直接返回 URL，
   桥接层原样透出该 URL（不缓存，因为不是我们的文件）。
+- **`partial_images`**：SDK 2.13 / 2.15 都只在流式事件的内部类型里支持中间图，非流式
+  `ImageClient.GenerateImagesAsync` 没有公开入口；工作台本身是单次长请求，也不展示中间态。
+  补它等于绕开 SDK 自己构造流式请求，收益为零。
+- **`safety_identifier`**：SDK 只暴露 `EndUserId`，且它序列化成**已废弃的 `user`** 字段，与文档要求
+  的 `safety_identifier` 不是同一个东西。应用侧也没有稳定的终端用户标识来源；等 SDK 提供公开 API
+  且产品确定身份口径后再接。
+- **按代际细分能力**：文档里 2.5 与 2.6 的参数集有差异，但当前全家族共用一套增强能力，
+  用上游报错兜底非法组合。若后续需要精确收敛，在 `Resolve()` 里按更具体的 id 前缀加分支即可，
+  前端无需改动（这正是能力驱动 UI 的收益）。

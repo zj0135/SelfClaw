@@ -25,10 +25,10 @@ namespace SelfClaw.Desktop.Services.ImageGeneration;
 internal sealed class ImageGenerationBridge
 {
     private const string MessagePrefix = "image-generation/";
-    private const int MaxPromptLength = 4000;
     private const int MaxIdentifierLength = 128;
     private const int MaxCount = 10;
     private const int RetentionDays = 7;
+    private const int MaxSizeLength = 32;
 
     // Base64 spends four characters per three bytes; the ceiling is checked before decoding so an
     // oversized paste is refused before its decoded buffer is allocated. Shares the attachment limit
@@ -139,7 +139,20 @@ internal sealed class ImageGenerationBridge
                         sizes = capabilities.Sizes,
                         qualities = capabilities.Qualities.Select(ToWireName),
                         styles = capabilities.Styles.Select(ToWireName),
-                        maxCount = capabilities.MaxCount
+                        maxCount = capabilities.MaxCount,
+                        maxPromptLength = capabilities.MaxPromptLength,
+                        backgrounds = (capabilities.Backgrounds ?? []).Select(ToWireName),
+                        outputFormats = (capabilities.OutputFormats ?? []).Select(ToWireName),
+                        moderations = (capabilities.Moderations ?? []).Select(ToWireName),
+                        supportsOutputCompression = capabilities.SupportsOutputCompression,
+                        customSize = capabilities.CustomSize is { } rules ? new
+                        {
+                            multipleOf = rules.MultipleOf,
+                            minAspectRatio = rules.MinAspectRatioDividend,
+                            maxAspectRatio = rules.MaxAspectRatioDividend,
+                            maxWidth = rules.MaxWidth,
+                            maxHeight = rules.MaxHeight
+                        } : null
                     }
                 });
             }
@@ -148,25 +161,32 @@ internal sealed class ImageGenerationBridge
         return new { type, requestId, ok = true, models = imageModels };
     }
 
-    private Task<object> HandleGenerateAsync(
+    private async Task<object> HandleGenerateAsync(
         string type,
         JsonElement payload,
         string? requestId,
         CancellationToken cancellationToken)
     {
+        var profileId = ReadOptionalGuid(payload, "modelProfileId", "profileId");
+        var capabilities = await _imageService.GetCapabilitiesForProfileAsync(profileId, cancellationToken).ConfigureAwait(false);
         var request = new ImageGenerationRequest(
-            ReadPrompt(payload),
+            ReadPrompt(payload, capabilities.MaxPromptLength),
             ReadCount(payload),
-            ReadOptionalString(payload, "size", 32),
+            ReadOptionalString(payload, "size", MaxSizeLength),
             ReadOptionalEnum<ImageGenerationQuality>(payload, "quality"),
-            ReadOptionalEnum<ImageGenerationStyle>(payload, "style"));
+            ReadOptionalEnum<ImageGenerationStyle>(payload, "style"),
+            ReadOptionalEnum<ImageGenerationBackground>(payload, "background"),
+            ReadOptionalEnum<ImageGenerationOutputFormat>(payload, "outputFormat"),
+            ReadOptionalInt(payload, "outputCompression"),
+            ReadOptionalEnum<ImageGenerationModeration>(payload, "moderation"));
 
-        return RunJobAsync(
+        return await RunJobAsync(
             payload,
             type,
             requestId,
-            (profileId, token) => _imageService.GenerateImagesAsync(profileId, request, token),
-            cancellationToken);
+            profileId,
+            (id, token) => _imageService.GenerateImagesAsync(id, request, token),
+            cancellationToken).ConfigureAwait(false);
     }
 
     private async Task<object> HandleEditAsync(
@@ -175,18 +195,25 @@ internal sealed class ImageGenerationBridge
         string? requestId,
         CancellationToken cancellationToken)
     {
+        var profileId = ReadOptionalGuid(payload, "modelProfileId", "profileId");
+        var capabilities = await _imageService.GetCapabilitiesForProfileAsync(profileId, cancellationToken).ConfigureAwait(false);
         var image = DecodeBase64(ReadRequiredString(payload, "imageBase64", MaximumBase64Length), "参考图");
         var request = new ImageEditRequest(
             image,
-            ReadPrompt(payload),
+            ReadPrompt(payload, capabilities.MaxPromptLength),
             ReadCount(payload),
-            ReadOptionalString(payload, "size", 32));
+            ReadOptionalString(payload, "size", MaxSizeLength),
+            ReadOptionalEnum<ImageGenerationQuality>(payload, "quality"),
+            ReadOptionalEnum<ImageGenerationBackground>(payload, "background"),
+            ReadOptionalEnum<ImageGenerationOutputFormat>(payload, "outputFormat"),
+            ReadOptionalInt(payload, "outputCompression"));
 
         return await RunJobAsync(
             payload,
             type,
             requestId,
-            (profileId, token) => _imageService.GenerateImageEditsAsync(profileId, request, token),
+            profileId,
+            (id, token) => _imageService.GenerateImageEditsAsync(id, request, token),
             cancellationToken).ConfigureAwait(false);
     }
 
@@ -213,10 +240,10 @@ internal sealed class ImageGenerationBridge
         JsonElement payload,
         string type,
         string? requestId,
+        Guid? modelProfileId,
         Func<Guid?, CancellationToken, Task<ImageGenerationResult>> operation,
         CancellationToken cancellationToken)
     {
-        var modelProfileId = ReadOptionalGuid(payload, "modelProfileId", "profileId");
         var jobId = ReadOptionalString(payload, "jobId", MaxIdentifierLength);
 
         using var jobSource = jobId is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -374,11 +401,11 @@ internal sealed class ImageGenerationBridge
     }
 
     private static string ToWireName<TEnum>(TEnum value) where TEnum : struct, Enum =>
-        value.ToString().ToLowerInvariant();
+        value is ImageGenerationQuality.XHigh ? "xhigh" : value.ToString().ToLowerInvariant();
 
-    private static string ReadPrompt(JsonElement payload)
+    private static string ReadPrompt(JsonElement payload, int maxPromptLength)
     {
-        var prompt = ReadRequiredString(payload, "prompt", MaxPromptLength).Trim();
+        var prompt = ReadRequiredString(payload, "prompt", maxPromptLength).Trim();
         return string.IsNullOrEmpty(prompt)
             ? throw new ArgumentException("请输入你想生成的图片描述。")
             : prompt;

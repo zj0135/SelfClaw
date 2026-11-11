@@ -22,4 +22,13 @@ public interface IImageGenerationService
     /// ever sends a request.
     /// </summary>
     ImageGenerationModelCapabilities GetModelCapabilities(string model);
+
+    /// <summary>
+    /// Resolves the exact profile a job will use and returns its capabilities. The host must validate
+    /// input against the same model that will execute the request, including the case where no id was
+    /// supplied and the service picks a default profile.
+    /// </summary>
+    Task<ImageGenerationModelCapabilities> GetCapabilitiesForProfileAsync(
+        Guid? modelProfileId,
+        CancellationToken cancellationToken = default);
 }

@@ -118,32 +118,59 @@ public sealed class ImageGenerationServiceTests
     }
 
     [Fact]
-    public void GetModelCapabilities_limits_dall_e_3_to_one_image()
+    public void GetModelCapabilities_matches_the_whole_gpt_image_family_by_containment()
     {
-        var capabilities = OpenAiImageModelCapabilities.Resolve("dall-e-3");
+        // Configured ids are versioned/suffixed (gpt-image-2.6-sunburst), so resolution must not rely
+        // on an exact "gpt-image-1" match.
+        var canonical = OpenAiImageModelCapabilities.Resolve("gpt-image-1");
+        var variant = OpenAiImageModelCapabilities.Resolve("openai/gpt-image-2.6-sunburst");
 
-        capabilities.MaxCount.Should().Be(1);
-        capabilities.Sizes.Should().Equal("1024x1024", "1024x1792", "1792x1024");
-        capabilities.Qualities.Should().BeEquivalentTo([ImageGenerationQuality.Standard, ImageGenerationQuality.Hd]);
-        capabilities.Styles.Should().NotBeEmpty();
-    }
-
-    [Fact]
-    public void GetModelCapabilities_gives_gpt_image_1_its_own_size_and_quality_set()
-    {
-        var capabilities = OpenAiImageModelCapabilities.Resolve("gpt-image-1");
-
-        capabilities.MaxCount.Should().Be(10);
-        capabilities.Sizes.Should().Equal("1024x1024", "1024x1536", "1536x1024");
-        capabilities.Sizes.Should().NotContain("1792x1024");
-        capabilities.Qualities.Should().BeEquivalentTo(
+        variant.Should().Be(canonical);
+        variant.MaxCount.Should().Be(10);
+        variant.Sizes.Should().Equal(
+            "auto", "1024x1024", "1536x1024", "1024x1536",
+            "1536x864", "864x1536", "1024x768", "768x1024", "1536x768", "768x1536");
+        variant.Qualities.Should().BeEquivalentTo(
         [
             ImageGenerationQuality.Auto,
             ImageGenerationQuality.Low,
             ImageGenerationQuality.Medium,
-            ImageGenerationQuality.High
+            ImageGenerationQuality.High,
+            ImageGenerationQuality.XHigh,
+            ImageGenerationQuality.Max
         ]);
-        capabilities.Styles.Should().BeEmpty();
+        variant.Styles.Should().BeEmpty();
+        variant.MaxPromptLength.Should().Be(32000);
+        variant.Backgrounds.Should().NotBeNullOrEmpty();
+        variant.OutputFormats.Should().NotBeNullOrEmpty();
+        variant.Moderations.Should().NotBeNullOrEmpty();
+        variant.SupportsOutputCompression.Should().BeTrue();
+        variant.CustomSize.Should().NotBeNull();
+    }
+
+    [Fact]
+    public void GetModelCapabilities_keeps_the_gateway_prompt_limit_conservative()
+    {
+        var capabilities = OpenAiImageModelCapabilities.Resolve("acme/legacy-image");
+
+        capabilities.MaxPromptLength.Should().Be(ImageGenerationModelCapabilities.DefaultMaxPromptLength);
+        capabilities.MaxPromptLength.Should().Be(1000);
+        capabilities.CustomSize.Should().BeNull();
+        capabilities.Backgrounds.Should().BeNullOrEmpty();
+        capabilities.OutputFormats.Should().BeNullOrEmpty();
+        capabilities.SupportsOutputCompression.Should().BeFalse();
+    }
+
+    [Fact]
+    public void GetModelCapabilities_treats_unrecognised_ids_as_gateways()
+    {
+        // Removed dedicated families must not silently inherit the gpt-image parameter set either:
+        // constraining a working gateway to a narrower set would turn a valid request into a 400.
+        var capabilities = OpenAiImageModelCapabilities.Resolve("legacy-image-model");
+
+        capabilities.Should().NotBe(OpenAiImageModelCapabilities.Resolve("gpt-image-1"));
+        capabilities.MaxCount.Should().Be(10);
+        capabilities.Styles.Should().NotBeEmpty();
     }
 
     [Fact]
@@ -160,8 +187,8 @@ public sealed class ImageGenerationServiceTests
     [Fact]
     public async Task Client_omits_response_format_and_style_for_gpt_image_1()
     {
-        // Regression guard for the P0 defect: gpt-image-1 answers 400 to both fields, so the request
-        // must not carry them even though dall-e-3 needs response_format.
+        // Regression guard for the P0 defect: gpt-image answers 400 to both fields, so neither may be
+        // serialised. response_format is never set at all; style is gated on a non-empty Styles set.
         var handler = new RecordingHandler();
         var client = CreateClient(handler, "gpt-image-1");
 
@@ -182,10 +209,12 @@ public sealed class ImageGenerationServiceTests
     }
 
     [Fact]
-    public async Task Client_sends_dall_e_3_style_and_hd_quality()
+    public async Task Client_sends_style_and_hd_quality_for_a_gateway_model()
     {
+        // Unrecognised ids keep the permissive superset, so the style switch and the standard/hd
+        // vocabulary remain reachable through the gateway path without a dedicated family branch.
         var handler = new RecordingHandler();
-        var client = CreateClient(handler, "dall-e-3");
+        var client = CreateClient(handler, "acme/legacy-image");
 
         await client.GenerateImagesAsync(new ImageGenerationRequest(
             "a cat",
@@ -204,23 +233,132 @@ public sealed class ImageGenerationServiceTests
     [Fact]
     public async Task Client_refuses_a_batch_larger_than_the_model_allows()
     {
-        var client = CreateClient(new RecordingHandler(), "dall-e-3");
+        var client = CreateClient(new RecordingHandler(), "gpt-image-2.6-flare");
 
-        var act = () => client.GenerateImagesAsync(new ImageGenerationRequest("a cat", Count: 4));
+        var act = () => client.GenerateImagesAsync(new ImageGenerationRequest("a cat", Count: 11));
 
         await act.Should().ThrowAsync<ArgumentOutOfRangeException>()
-            .WithMessage("*between 1 and 1*");
+            .WithMessage("*between 1 and 10*");
     }
 
     [Fact]
-    public async Task Client_refuses_a_size_the_model_does_not_support()
+    public async Task Client_refuses_a_size_neither_preset_nor_custom_legal()
     {
-        var client = CreateClient(new RecordingHandler(), "gpt-image-1");
+        var client = CreateClient(new RecordingHandler(), "gpt-image-2.6-flare");
 
-        var act = () => client.GenerateImagesAsync(new ImageGenerationRequest("a cat", Size: "1792x1024"));
+        // 1000 is not a multiple of 16: the size parses as a custom one, then fails the rules.
+        var act = () => client.GenerateImagesAsync(new ImageGenerationRequest("a cat", Size: "1000x1000"));
 
         await act.Should().ThrowAsync<ArgumentException>()
-            .WithMessage("*does not support size '1792x1024'*1024x1536*");
+            .WithMessage("*multiples of 16*");
+    }
+
+    [Fact]
+    public async Task Client_refuses_a_custom_size_outside_the_documented_bounds()
+    {
+        var client = CreateClient(new RecordingHandler(), "gpt-image-2.5-flare");
+
+        // 3840x1280 is 16-aligned but its 3:1 ratio is exactly at the limit; 5120x1024 exceeds both
+        // the width ceiling and the 3:1 ratio, so it must be refused before leaving the client.
+        var act = () => client.GenerateImagesAsync(new ImageGenerationRequest("a cat", Size: "5120x1024"));
+
+        await act.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Fact]
+    public async Task Client_sends_the_full_gpt_image_parameter_set()
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(handler, "gpt-image-2.5-sunburst");
+
+        await client.GenerateImagesAsync(new ImageGenerationRequest(
+            "a cat",
+            Size: "3840x2160",
+            Quality: ImageGenerationQuality.XHigh,
+            Background: ImageGenerationBackground.Transparent,
+            OutputFormat: ImageGenerationOutputFormat.Webp,
+            OutputCompression: 85,
+            Moderation: ImageGenerationModeration.Low));
+
+        using var body = JsonDocument.Parse(handler.Body!);
+        var root = body.RootElement;
+        root.GetProperty("size").GetString().Should().Be("3840x2160");
+        root.GetProperty("quality").GetString().Should().Be("xhigh");
+        root.GetProperty("background").GetString().Should().Be("transparent");
+        root.GetProperty("output_format").GetString().Should().Be("webp");
+        root.GetProperty("output_compression").GetInt32().Should().Be(85);
+        root.GetProperty("moderation").GetString().Should().Be("low");
+        // GPT Image always returns base64; response_format and style are deliberately absent.
+        root.TryGetProperty("response_format", out _).Should().BeFalse();
+        root.TryGetProperty("style", out _).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Client_omits_unsupported_gpt_image_knobs_for_gateway_models()
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(handler, "acme/legacy-image");
+
+        var act = () => client.GenerateImagesAsync(new ImageGenerationRequest(
+            "a cat",
+            Background: ImageGenerationBackground.Transparent));
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*does not support background*");
+        handler.Body.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Client_sends_new_aspect_ratio_presets_verbatim()
+    {
+        // Presets are parsed generically instead of through a fixed switch, so adding a ratio to the
+        // capability table is enough to make it work end to end.
+        foreach (var (size, expected) in new[]
+        {
+            ("1536x864", "1536x864"),
+            ("1024x768", "1024x768"),
+            ("768x1536", "768x1536")
+        })
+        {
+            var handler = new RecordingHandler();
+            var client = CreateClient(handler, "gpt-image-2.6-flare");
+
+            await client.GenerateImagesAsync(new ImageGenerationRequest("a cat", Size: size));
+
+            using var body = JsonDocument.Parse(handler.Body!);
+            body.RootElement.GetProperty("size").GetString().Should().Be(expected);
+        }
+    }
+
+    [Fact]
+    public async Task Client_refuses_transparent_background_with_jpeg()
+    {
+        var client = CreateClient(new RecordingHandler(), "gpt-image-2.5-flare");
+
+        var act = () => client.GenerateImagesAsync(new ImageGenerationRequest(
+            "a cat",
+            Background: ImageGenerationBackground.Transparent,
+            OutputFormat: ImageGenerationOutputFormat.Jpeg));
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*透明背景不支持 JPEG*");
+    }
+
+    [Fact]
+    public async Task Client_sends_auto_size_and_max_quality()
+    {
+        var handler = new RecordingHandler();
+        var client = CreateClient(handler, "gpt-image-2.6-sunburst");
+
+        await client.GenerateImagesAsync(new ImageGenerationRequest(
+            "a cat",
+            Size: "auto",
+            Quality: ImageGenerationQuality.Max));
+
+        using var body = JsonDocument.Parse(handler.Body!);
+        var root = body.RootElement;
+        root.GetProperty("size").GetString().Should().Be("auto");
+        root.GetProperty("quality").GetString().Should().Be("max");
     }
 
     [Fact]
@@ -228,7 +366,7 @@ public sealed class ImageGenerationServiceTests
     {
         var handler = new RecordingHandler();
         var profileId = Guid.NewGuid();
-        var client = CreateClient(handler, "dall-e-3", profileId);
+        var client = CreateClient(handler, "gpt-image-2.6-sunburst", profileId);
 
         var result = await client.GenerateImagesAsync(new ImageGenerationRequest("a cat"));
 
@@ -342,9 +480,9 @@ public sealed class ImageGenerationServiceTests
         return new AiModelProfile(
             profileId,
             connectionId,
-            "dall-e-3",
+            "gpt-image-2.5-flare",
             apiFormat,
-            "dall-e-3",
+            "gpt-image-2.5-flare",
             new AiSamplingOptions(false, 0.7, false, 0.7),
             new Dictionary<string, JsonElement>(),
             now,
