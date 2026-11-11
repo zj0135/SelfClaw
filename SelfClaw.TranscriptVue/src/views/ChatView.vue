@@ -1,6 +1,8 @@
 <script setup>
 import { computed, ref, watch } from 'vue';
 import ComposerPanel from '../components/chat/composer/ComposerPanel.vue';
+import ChatEmptyStarter from '../components/chat/ChatEmptyStarter.vue';
+import TranscriptSkeleton from '../components/chat/transcript/TranscriptSkeleton.vue';
 import TodoPlanDock from '../components/chat/todo/TodoPlanDock.vue';
 import AskUserDock from '../components/chat/question/AskUserDock.vue';
 import ConversationQueue from '../components/chat/ConversationQueue.vue';
@@ -27,7 +29,7 @@ const transcriptPanelRef = ref(null);
 const dockRef = ref(null);
 const collapse = useTranscriptCollapse();
 const transcriptScroll = useTranscriptScroll(() => transcriptPanelRef.value?.getScrollEl?.() ?? null);
-const { state, isEmptyConversation } = useChatTranscript(transcriptScroll);
+const { state, isEmptyConversation, isLoadingHistory } = useChatTranscript(transcriptScroll);
 const workspace = useWorkspaceSelection(computed(() => state.selectedConversationId), bridge);
 // 附件与提交共享同一个新对话 uuid：两者都在这里接上 transcript 的单会话选择。
 const composerAttachments = useComposerAttachments(bridge, () => state.selectedConversationId);
@@ -42,12 +44,21 @@ const questions = useChatQuestions(bridge);
 const turnStatus = useChatTurnStatus(state);
 // 计划 dock 的折叠偏好按会话记忆，默认跟随忙碌态（忙碌展开、空闲收成一行）。
 const chatTodo = useChatTodo(computed(() => state.selectedConversationId));
+const composerPanelRef = ref(null);
 
 function openImagePreview(preview) { emit('preview-image', preview); }
 
 // 点到转录区或输入区即让终端失焦；终端在右侧 dock 内，dock 内部的点击由它自己处理。
 function onWorkspaceInteraction() {
 	dockRef.value?.blurTerminal?.();
+}
+
+function onSelectPreset(promptText) {
+	composerPanelRef.value?.setText(promptText);
+}
+
+function onTriggerMention(token) {
+	composerPanelRef.value?.setText(token);
 }
 
 defineExpose({
@@ -59,19 +70,18 @@ defineExpose({
 	<div class="chat-shell">
 		<div class="workspace" :class="{ 'empty-workspace': isEmptyConversation }" @pointerdown="onWorkspaceInteraction"
 			@focusin="onWorkspaceInteraction">
-			<TranscriptPanel v-if="!isEmptyConversation" ref="transcriptPanelRef" :items="state.items"
+			<TranscriptPanel v-if="!isEmptyConversation && !isLoadingHistory" ref="transcriptPanelRef" :items="state.items"
 				:collapse="collapse" :activity-text="state.activityText" :turn-status="turnStatus"
 				@content-resize="transcriptScroll.onContentResize" @scroll="transcriptScroll.onScroll"
 				@preview-image="openImagePreview" />
-			<section v-else class="empty-composer-stage" aria-label="新对话">
-				<div class="empty-composer-copy">
-					<h1>想构建什么？</h1>
-					<p>随意提问，或使用命令/工具。</p>
-				</div>
-			</section>
-			<ComposerPanel :busy="state.isBusy || composer.submitting.value"
+			<TranscriptSkeleton v-else-if="isLoadingHistory" />
+			<div v-else class="empty-composer-stage">
+				<ChatEmptyStarter @select-preset="onSelectPreset" @trigger-mention="onTriggerMention" />
+			</div>
+			<ComposerPanel ref="composerPanelRef" :busy="state.isBusy || composer.submitting.value"
 				:queueable="state.agentMode === 'direct'"
 				:stoppable="!state.isContinuation"
+				:loading-history="isLoadingHistory"
 				:workspace-selection="workspace.state" :git-loading="workspace.state.gitLoading"
 				:git-error="workspace.state.gitError" :submit-error="composer.error.value" :agent-mode="state.agentMode"
 				:selected-agent-id="state.selectedAgentId" :selected-agent-name="state.selectedAgentName"
@@ -144,8 +154,11 @@ defineExpose({
 }
 
 .workspace.empty-workspace {
-	grid-template-rows: minmax(128px, 0.78fr) auto minmax(160px, 1fr);
+	grid-template-rows: minmax(140px, auto) auto minmax(28px, 0.4fr);
 	align-items: stretch;
+	background:
+		radial-gradient(ellipse 65% 42% at 50% 28%, color-mix(in srgb, var(--accent) 3.5%, transparent) 0%, transparent 75%),
+		var(--panel);
 }
 
 .empty-composer-stage {
@@ -153,56 +166,18 @@ defineExpose({
 	display: flex;
 	align-items: flex-end;
 	justify-content: center;
-	padding: 0 28px 28px;
+	padding: 24px 28px 16px;
 	background: transparent;
-}
-
-.empty-composer-copy {
-	text-align: center;
-	animation: empty-rise 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
-}
-
-@keyframes empty-rise {
-	from {
-		opacity: 0;
-		transform: translateY(14px);
-	}
-
-	to {
-		opacity: 1;
-		transform: none;
-	}
-}
-
-.empty-composer-copy h1 {
-	margin: 0;
-	color: var(--text);
-	font-family: var(--font-display);
-	font-size: 42px;
-	font-weight: 700;
-	line-height: 1.1;
-	letter-spacing: 0;
-}
-
-.empty-composer-copy p {
-	margin: 12px 0 0;
-	color: var(--faint);
-	font-size: var(--fs-14);
-	line-height: 1.6;
 }
 
 @media (max-width: 960px) {
 	.workspace.empty-workspace {
-		grid-template-rows: minmax(112px, 0.7fr) auto minmax(140px, 1fr);
+		grid-template-rows: minmax(120px, auto) auto minmax(20px, 0.3fr);
 	}
 
 	.empty-composer-stage {
-		padding-inline: 18px;
-		padding-bottom: 22px;
-	}
-
-	.empty-composer-copy h1 {
-		font-size: 30px;
+		padding-inline: 16px;
+		padding-bottom: 12px;
 	}
 }
 </style>

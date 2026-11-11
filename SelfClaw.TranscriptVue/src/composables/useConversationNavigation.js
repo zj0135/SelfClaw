@@ -3,6 +3,7 @@ import { useHostBridge, isSuperseded } from './hostBridge.js';
 import { useTranscriptBridge } from './transcriptBridge.js';
 import { useToast } from './useToast.js';
 import { useConfirm } from './useConfirm.js';
+import { setPendingConversation } from './useChatTranscript.js';
 import { buildSidebarGroups } from '../renderers/sidebarGroups.js';
 
 // 「归档」是按时间推导出来的：挂机过夜、跨过第 7 天边界都得自己迁移，
@@ -117,10 +118,12 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 			const actionId = typeof action === 'string' ? action : action?.id;
 			switch (actionId) {
 				case 'new-chat':
+					setPendingConversation(null);
 					currentViewId.value = 'chat';
 					await request('new-chat', { keepWorkspace: true });
 					break;
 				case 'add-conversations':
+					setPendingConversation(null);
 					currentViewId.value = 'chat';
 					await request('new-chat', {});
 					break;
@@ -188,10 +191,12 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 			}
 
 			if (sidebarConversations.value.some((conversation) => conversation.id === id)) {
+				setPendingConversation(id);
 				currentViewId.value = 'chat';
 				await request('select-conversation', { conversationId: id });
 			}
 		} catch (failure) {
+			setPendingConversation(undefined);
 			if (!isSuperseded(failure)) showToast(failure?.message || String(failure));
 		}
 	}

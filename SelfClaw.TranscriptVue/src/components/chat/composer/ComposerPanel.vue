@@ -60,6 +60,7 @@ const props = defineProps({
 	attachmentsError: { type: String, default: '' },
 	// 图片入口的唯一闸门：Direct 且所选模型多模态。前端不复制宿主的可用性逻辑。
 	imagesEnabled: { type: Boolean, default: false },
+	loadingHistory: { type: Boolean, default: false },
 });
 
 const emit = defineEmits([
@@ -86,18 +87,24 @@ const shellRef = ref(null);
 const inputRef = ref(null);
 
 const hasText = computed(() => composerText.value.trim().length > 0);
-const canSend = computed(() => hasText.value && (!props.busy || props.queueable) && !props.questionPending);
+const canSend = computed(() => hasText.value && (!props.busy || props.queueable) && !props.questionPending && !props.loadingHistory);
 // 单一按钮：空闲显示发送；Direct 忙碌且输入框有内容时，同一位置变成发送（入队）；否则显示停止/进度。
 const showSend = computed(() => !props.busy || (props.queueable && hasText.value));
 
 // 待答期间输入框仍可打字（用户可能想边想边改草稿），只有发送被挡住。
-const inputPlaceholder = computed(() => (props.questionPending
-	? '请先回答上方的问题'
-	: '让助手帮你处理项目…（@ 文件 · / 指令 · $ 技能）'));
+const inputPlaceholder = computed(() => {
+	if (props.loadingHistory) {
+		return '正在载入历史对话…';
+	}
+	if (props.questionPending) {
+		return '请先回答上方的问题';
+	}
+	return '让助手帮你处理项目…（@ 文件 · / 指令 · $ 技能）';
+});
 
 function submit() {
 	// 键盘 Enter 也走这里，所以早退必须在取值之前。
-	if (props.questionPending) {
+	if (props.questionPending || props.loadingHistory) {
 		return;
 	}
 
@@ -238,6 +245,20 @@ function browseWorkspaceFolder() {
 function deleteWorkspaceRoot(workspaceRootId) {
 	emit('delete-workspace-root', workspaceRootId);
 }
+
+function setText(text) {
+	inputRef.value?.setText(text);
+}
+
+function focus() {
+	inputRef.value?.focus();
+}
+
+defineExpose({
+	setText,
+	focus,
+	insertSkill,
+});
 </script>
 
 <template>
@@ -318,12 +339,12 @@ function deleteWorkspaceRoot(workspaceRootId) {
 	display: flex;
 	flex-direction: column;
 	padding: 16px 18px 12px;
-	border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+	border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
 	border-radius: 16px 16px 0 0;
 	background: var(--panel);
 	box-shadow:
-		0 1px 2px rgba(var(--shadow-ink), 0.05),
-		0 8px 24px rgba(var(--shadow-ink), 0.04);
+		0 1px 2px rgba(var(--shadow-ink), 0.04),
+		0 8px 26px -4px rgba(var(--shadow-ink), 0.06);
 	transition: border-color 0.18s, box-shadow 0.18s, background 0.18s;
 }
 
@@ -346,11 +367,11 @@ function deleteWorkspaceRoot(workspaceRootId) {
 }
 
 .composer-shell:focus-within {
-	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+	border-color: color-mix(in srgb, var(--accent) 52%, transparent);
 	box-shadow:
-		0 1px 2px rgba(var(--shadow-ink), 0.05),
-		0 12px 32px rgba(var(--shadow-ink), 0.07),
-		0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+		0 1px 3px rgba(var(--shadow-ink), 0.05),
+		0 16px 36px -6px rgba(var(--shadow-ink), 0.1),
+		0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 :global(.empty-workspace) .composer-shell {
@@ -397,20 +418,20 @@ function deleteWorkspaceRoot(workspaceRootId) {
 	height: 36px;
 	border: 0;
 	border-radius: 50%;
-	background: var(--accent);
+	background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
 	color: var(--accent-ink);
 	cursor: pointer;
-	box-shadow: 0 4px 14px color-mix(in srgb, var(--accent) 30%, transparent);
+	box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 35%, transparent);
 	transition:
-		background 0.16s,
+		filter 0.16s,
 		box-shadow 0.16s,
 		opacity 0.15s,
 		transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .send-btn:hover {
-	background: var(--accent-2);
-	box-shadow: 0 8px 20px color-mix(in srgb, var(--accent) 36%, transparent);
+	filter: brightness(1.08);
+	box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 45%, transparent);
 	transform: translateY(-1px);
 }
 
@@ -419,11 +440,13 @@ function deleteWorkspaceRoot(workspaceRootId) {
 }
 
 .send-btn:disabled {
-	background: var(--border-strong);
+	background: color-mix(in srgb, var(--text) 8%, transparent);
+	color: var(--faint);
 	box-shadow: none;
 	opacity: 0.55;
 	cursor: default;
 	transform: none;
+	filter: none;
 }
 
 .send-btn.stop {

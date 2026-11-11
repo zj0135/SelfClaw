@@ -80,19 +80,19 @@ function setWorkspaceMode(mode) {
 	height: 36px;
 	margin-top: -1px;
 	padding: 0 12px;
-	border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
-	border-top-color: var(--line-2);
+	border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+	border-top-color: var(--line-1);
 	border-radius: 0 0 16px 16px;
 	background: var(--panel);
-	box-shadow: 0 8px 24px rgba(var(--shadow-ink), 0.04);
+	box-shadow: 0 8px 26px -4px rgba(var(--shadow-ink), 0.06);
 	clip-path: inset(-420px -48px -420px -48px);
 	transition: border-color 0.18s, box-shadow 0.18s;
 }
 
 :global(.composer-shell:focus-within + .composer-statusbar) {
-	border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-	border-top-color: var(--line-2);
-	box-shadow: 0 12px 32px rgba(var(--shadow-ink), 0.07), 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+	border-color: color-mix(in srgb, var(--accent) 52%, transparent);
+	border-top-color: var(--line-1);
+	box-shadow: 0 16px 36px -6px rgba(var(--shadow-ink), 0.1), 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .workspace-mode {

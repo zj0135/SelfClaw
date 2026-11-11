@@ -529,7 +529,7 @@ onUnmounted(() => {
 				<span class="ico" aria-hidden="true">
 					<Plus :size="14" :stroke-width="2.2" />
 				</span>
-				<span>新建对话</span>
+				<span class="label">新建对话</span>
 			</button>
 			<button
 				class="head-collapse"
@@ -916,6 +916,7 @@ onUnmounted(() => {
 	align-items: center;
 	gap: 8px;
 	padding: 16px 12px 0;
+	overflow: hidden;
 }
 
 .head-new {
@@ -933,10 +934,28 @@ onUnmounted(() => {
 	font-size: var(--fs-125);
 	font-weight: 620;
 	box-shadow: 0 1px 3px rgba(var(--shadow-ink), 0.04);
+	white-space: nowrap;
+	overflow: hidden;
+	animation: head-new-in 0.22s var(--sb-ease-out) both;
 	transition:
 		border-color 0.14s,
 		box-shadow 0.16s,
 		transform 0.12s var(--sb-ease-spring);
+}
+
+.head-new .label {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: clip;
+}
+
+@keyframes head-new-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
 }
 
 .head-new:hover {
@@ -1842,6 +1861,7 @@ onUnmounted(() => {
 	flex: 0 0 auto;
 	padding: 10px 12px 14px;
 	border-top: 1px solid var(--sb-line);
+	overflow: hidden;
 }
 
 .settings-btn {
@@ -1857,6 +1877,9 @@ onUnmounted(() => {
 	color: var(--sb-mute);
 	font-size: var(--fs-125);
 	font-weight: 560;
+	white-space: nowrap;
+	overflow: hidden;
+	animation: head-new-in 0.22s var(--sb-ease-out) both;
 	transition:
 		background 0.14s,
 		border-color 0.14s,
@@ -1885,10 +1908,17 @@ onUnmounted(() => {
 
 .settings-btn .label {
 	flex: 1;
+	min-width: 0;
 	text-align: left;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: clip;
 }
 
 .settings-btn .chev {
+	display: grid;
+	place-items: center;
+	flex: none;
 	color: var(--sb-faint);
 	transition: transform 0.18s var(--sb-ease-out);
 }

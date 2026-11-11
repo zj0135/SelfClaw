@@ -34,10 +34,11 @@ const subagentRunning = computed(() => state.subagents.running > 0);
 	flex-direction: column;
 	gap: 4px;
 	padding: 4px;
-	border: 1px solid var(--border);
+	border: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
 	border-radius: 10px;
-	background: var(--panel);
-	box-shadow: var(--card-shadow);
+	background: color-mix(in srgb, var(--panel) 85%, transparent);
+	backdrop-filter: blur(12px);
+	box-shadow: 0 4px 16px rgba(var(--shadow-ink), 0.05);
 }
 
 .dock-rail-button {

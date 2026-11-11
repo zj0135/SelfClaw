@@ -266,6 +266,25 @@ function clear() {
 	emit('trigger', null);
 }
 
+function setText(text) {
+	const root = rootRef.value;
+	if (!root) {
+		return;
+	}
+
+	root.replaceChildren(document.createTextNode(text || ''));
+	syncValue();
+	focus();
+	const selection = window.getSelection();
+	if (selection) {
+		const range = document.createRange();
+		range.selectNodeContents(root);
+		range.collapse(false);
+		selection.removeAllRanges();
+		selection.addRange(range);
+	}
+}
+
 function focus() {
 	rootRef.value?.focus();
 }
@@ -292,7 +311,7 @@ onBeforeUnmount(() => {
 	rootRef.value?.querySelectorAll('[data-chip-kind]').forEach((chip) => render(null, chip));
 });
 
-defineExpose({ insertChip, replaceTriggerWithChip, clear, focus });
+defineExpose({ insertChip, replaceTriggerWithChip, clear, focus, setText });
 </script>
 
 <template>

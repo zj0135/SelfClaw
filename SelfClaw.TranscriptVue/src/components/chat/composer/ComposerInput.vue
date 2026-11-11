@@ -39,6 +39,7 @@ defineExpose({
 	insertChip: (chip) => editorRef.value?.insertChip(chip),
 	clear: () => editorRef.value?.clear(),
 	focus: () => editorRef.value?.focus(),
+	setText: (text) => editorRef.value?.setText(text),
 });
 </script>
 
