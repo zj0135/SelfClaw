@@ -1,5 +1,6 @@
 <script setup>
 import { computed, markRaw, onMounted, onUnmounted, reactive, ref } from 'vue';
+import { ChevronLeft, ChevronRight, X } from 'lucide-vue-next';
 import AppSidebar from './components/sidebar/AppSidebar.vue';
 import AppToast from './components/common/AppToast.vue';
 import AppConfirmDialog from './components/common/AppConfirmDialog.vue';
@@ -22,6 +23,10 @@ const {
 	preview: imagePreview,
 	open: openImagePreview,
 	close: closeImagePreview,
+	hasPrev: hasPrevImage,
+	hasNext: hasNextImage,
+	prev: prevImage,
+	next: nextImage,
 } = useImagePreview();
 
 const viewRegistry = {
@@ -157,9 +162,50 @@ onUnmounted(() => {
 			</div>
 		</main>
 		<div v-if="imagePreview" class="image-preview-backdrop" @click.self="closeImagePreview">
+			<!-- 左侧切换按钮 -->
+			<button
+				v-if="imagePreview.total > 1"
+				class="preview-nav-btn prev"
+				type="button"
+				:disabled="!hasPrevImage"
+				title="上一张 (←)"
+				aria-label="上一张图片"
+				@click.stop="prevImage"
+			>
+				<ChevronLeft :size="28" />
+			</button>
+
+			<!-- 图片主体与计数器 -->
 			<div class="image-preview-dialog">
 				<img :src="imagePreview.src" :alt="imagePreview.alt || 'Preview image'" />
+				<div v-if="imagePreview.total > 1" class="preview-counter">
+					{{ (imagePreview.index ?? 0) + 1 }} / {{ imagePreview.total }}
+				</div>
 			</div>
+
+			<!-- 右侧切换按钮 -->
+			<button
+				v-if="imagePreview.total > 1"
+				class="preview-nav-btn next"
+				type="button"
+				:disabled="!hasNextImage"
+				title="下一张 (→)"
+				aria-label="下一张图片"
+				@click.stop="nextImage"
+			>
+				<ChevronRight :size="28" />
+			</button>
+
+			<!-- 关闭按钮 -->
+			<button
+				class="preview-close-btn"
+				type="button"
+				title="关闭 (Esc)"
+				aria-label="关闭预览"
+				@click="closeImagePreview"
+			>
+				<X :size="20" />
+			</button>
 		</div>
 		<AppConfirmDialog />
 		<AppToast />
@@ -824,14 +870,117 @@ a:hover {
 	padding: 24px;
 	background: var(--overlay-strong);
 	backdrop-filter: blur(8px);
+	user-select: none;
+}
+
+.image-preview-dialog {
+	position: relative;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	max-width: min(92vw, 1500px);
+	max-height: 90vh;
 }
 
 .image-preview-dialog img {
 	display: block;
-	max-width: min(96vw, 1600px);
-	max-height: 92vh;
-	border-radius: 8px;
+	max-width: min(88vw, 1400px);
+	max-height: 84vh;
+	object-fit: contain;
+	border-radius: 10px;
 	box-shadow: 0 24px 80px var(--overlay-shadow);
+}
+
+.preview-nav-btn {
+	position: fixed;
+	top: 50%;
+	transform: translateY(-50%);
+	z-index: 1001;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 50px;
+	height: 50px;
+	border-radius: 50%;
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	background: rgba(15, 23, 42, 0.52);
+	backdrop-filter: blur(14px);
+	color: #ffffff;
+	cursor: pointer;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+	transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+	outline: none;
+}
+
+.preview-nav-btn.prev {
+	left: 28px;
+}
+
+.preview-nav-btn.next {
+	right: 28px;
+}
+
+.preview-nav-btn:hover:not(:disabled) {
+	background: rgba(15, 23, 42, 0.85);
+	border-color: rgba(255, 255, 255, 0.38);
+	transform: translateY(-50%) scale(1.08);
+}
+
+.preview-nav-btn:active:not(:disabled) {
+	transform: translateY(-50%) scale(0.96);
+}
+
+.preview-nav-btn:disabled {
+	opacity: 0.22;
+	cursor: not-allowed;
+	pointer-events: none;
+}
+
+.preview-close-btn {
+	position: fixed;
+	top: 24px;
+	right: 28px;
+	z-index: 1001;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 40px;
+	height: 40px;
+	border-radius: 50%;
+	border: 1px solid rgba(255, 255, 255, 0.18);
+	background: rgba(15, 23, 42, 0.52);
+	backdrop-filter: blur(14px);
+	color: #ffffff;
+	cursor: pointer;
+	box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+	transition: all 0.2s ease;
+	outline: none;
+}
+
+.preview-close-btn:hover {
+	background: rgba(239, 68, 68, 0.85);
+	border-color: rgba(239, 68, 68, 0.4);
+	transform: scale(1.06);
+}
+
+.preview-counter {
+	position: absolute;
+	bottom: -36px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 4px 14px;
+	border-radius: 9999px;
+	background: rgba(15, 23, 42, 0.65);
+	backdrop-filter: blur(8px);
+	border: 1px solid rgba(255, 255, 255, 0.12);
+	color: #ffffff;
+	font-size: 12px;
+	font-weight: 600;
+	letter-spacing: 0.5px;
+	font-variant-numeric: tabular-nums;
+	box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
 }
 
 @media (max-width: 960px) {
