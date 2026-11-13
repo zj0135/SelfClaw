@@ -154,6 +154,6 @@ export function installActivityHost() {
 			contentRevisions[index]++; push();
 		},
 		finish(index = 0) { tasks[index].status = 'succeeded'; tasks[index].phase = 'succeeded'; tasks[index].canCancel = false; tasks[index].deliveryStatus = 'pending'; tasks[index].completedAtUtc = new Date().toISOString(); segments[index][2].status = 'completed'; segments[index][2].isPending = false; segments[index][2].detailText = 'Recorded tool result'; contentRevisions[index]++; push(); },
-		transcript(parentId = parent) { send({ type: 'replaceState', revision: 1, selectedConversationId: parentId, isBusy: false, agentMode: 'direct', selectedAgentId: 'build', selectedAgentName: 'Build', conversations: [{ id: parentId, title: 'Activity verification' }], items: [{ id: 'parent-message', kind: 'message', role: 'assistant', status: 'completed', timestamp: '12:00', isThinking: false, segments: [{ kind: 'content', markdown: 'Parent answer remains independent.\n\n' + 'Transcript line.\n\n'.repeat(25) }] }] }); },
+		transcript(parentId = parent, items = null) { send({ type: 'replaceState', revision: 1, selectedConversationId: parentId, isBusy: false, agentMode: 'direct', selectedAgentId: 'build', selectedAgentName: 'Build', conversations: [{ id: parentId, title: 'Activity verification' }], items: items || [{ id: 'parent-message', kind: 'message', role: 'assistant', status: 'completed', timestamp: '12:00', isThinking: false, segments: [{ kind: 'content', markdown: 'Parent answer remains independent.\n\n' + 'Transcript line.\n\n'.repeat(25) }] }] }); },
 	};
 }

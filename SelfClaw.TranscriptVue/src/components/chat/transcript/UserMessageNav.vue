@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { ArrowDown } from 'lucide-vue-next';
+import { ArrowDown, ChevronDown, ChevronUp } from 'lucide-vue-next';
 import { extractUserNavItems } from '../../../renderers/transcript.js';
 
 const props = defineProps({
@@ -14,16 +14,38 @@ const props = defineProps({
 	},
 });
 
+const SCROLL_BOTTOM_THRESHOLD_PX = 120;
+const DOT_STRIDE_PX = 16;
+const TRACK_PADDING_PX = 6;
+const MAX_TRACK_HEIGHT_PX = 146;
+
 const activeId = ref(null);
 const hoveredItem = ref(null);
 const bottomHovered = ref(false);
 const hoverTop = ref(0);
 const showScrollBottom = ref(false);
+const trackEl = ref(null);
+const trackHeight = ref(MAX_TRACK_HEIGHT_PX);
 let currentScrollContainer = null;
-
-const SCROLL_BOTTOM_THRESHOLD_PX = 120;
+let trackResizeObserver = null;
 
 const navItems = computed(() => extractUserNavItems(props.items));
+const activeIndex = computed(() => navItems.value.findIndex((item) => item.id === activeId.value));
+const trackCapacity = computed(() => Math.max(1, Math.floor((trackHeight.value - TRACK_PADDING_PX) / DOT_STRIDE_PX)));
+const visibleRange = computed(() => {
+	const total = navItems.value.length;
+	const capacity = trackCapacity.value;
+	if (total <= capacity) {
+		return { start: 0, end: total, capacity, total };
+	}
+
+	const index = Math.max(0, activeIndex.value);
+	const start = Math.max(0, Math.min(total - capacity, index - Math.floor(capacity / 2)));
+	return { start, end: start + capacity, capacity, total };
+});
+const visibleItems = computed(() => navItems.value.slice(visibleRange.value.start, visibleRange.value.end));
+const canScrollUp = computed(() => visibleRange.value.start > 0);
+const canScrollDown = computed(() => visibleRange.value.end < visibleRange.value.total);
 
 const popoverText = computed(() => {
 	if (hoveredItem.value?.text) {
@@ -74,6 +96,14 @@ function onBottomHover(event) {
 function onItemLeave() {
 	hoveredItem.value = null;
 	bottomHovered.value = false;
+}
+
+function measureTrack() {
+	const nav = trackEl.value?.parentElement;
+	const measured = nav ? Math.round(nav.getBoundingClientRect().height) : 0;
+	if (measured > 0) {
+		trackHeight.value = measured;
+	}
 }
 
 function checkScrollBottom(container) {
@@ -144,6 +174,32 @@ function scrollToBottom() {
 	}
 }
 
+function stepWindow(direction) {
+	const total = navItems.value.length;
+	const capacity = visibleRange.value.capacity;
+	if (total <= capacity) {
+		return;
+	}
+
+	const nextIndex = Math.max(0, Math.min(total - 1, (activeIndex.value < 0 ? 0 : activeIndex.value) + direction * capacity));
+	const target = navItems.value[nextIndex];
+	if (target) {
+		scrollTo(target.id);
+	}
+}
+
+function onTrackWheel(event) {
+	if (!canScrollUp.value && !canScrollDown.value) {
+		return;
+	}
+
+	event.preventDefault();
+	const direction = Math.sign(event.deltaY);
+	if (direction) {
+		stepWindow(direction);
+	}
+}
+
 function bindScrollListener() {
 	unbindScrollListener();
 	const container = props.getScrollEl ? props.getScrollEl() : null;
@@ -161,6 +217,23 @@ function unbindScrollListener() {
 	}
 }
 
+function observeTrack() {
+	trackResizeObserver?.disconnect();
+	if (typeof ResizeObserver !== 'function') {
+		measureTrack();
+		return;
+	}
+
+	const nav = trackEl.value?.parentElement;
+	if (!nav) {
+		return;
+	}
+
+	trackResizeObserver = new ResizeObserver(measureTrack);
+	trackResizeObserver.observe(nav);
+	measureTrack();
+}
+
 watch(() => props.items, () => {
 	nextTick(() => {
 		if (!currentScrollContainer) {
@@ -168,15 +241,24 @@ watch(() => props.items, () => {
 		} else {
 			updateActive();
 		}
+		if (trackEl.value && !trackResizeObserver) {
+			observeTrack();
+		} else {
+			measureTrack();
+		}
 	});
 }, { deep: true });
 
 onMounted(() => {
-	nextTick(() => bindScrollListener());
+	nextTick(() => {
+		bindScrollListener();
+		observeTrack();
+	});
 });
 
 onUnmounted(() => {
 	unbindScrollListener();
+	trackResizeObserver?.disconnect();
 });
 
 defineExpose({
@@ -194,13 +276,24 @@ defineExpose({
 			{{ popoverText }}
 		</div>
 
-		<div v-if="navItems.length > 0" class="nav-track">
-			<button v-for="(item, index) in navItems" :key="item.id" type="button" class="nav-item"
-				:class="{ active: item.id === activeId }" :aria-label="`跳转到第 ${index + 1} 条用户消息`"
+		<div v-if="navItems.length > 0" ref="trackEl" class="nav-track"
+			:aria-label="`用户消息导航，共 ${visibleRange.total} 轮，当前显示第 ${visibleRange.start + 1} 到 ${visibleRange.end} 轮`"
+			@wheel="onTrackWheel">
+			<button v-if="canScrollUp" type="button" class="nav-step" aria-label="查看更早的用户消息"
+				@click="stepWindow(-1)">
+				<ChevronUp :size="12" :stroke-width="2" aria-hidden="true" />
+			</button>
+			<button v-for="(item, index) in visibleItems" :key="item.id" type="button" class="nav-item"
+				:class="{ active: item.id === activeId }" :aria-label="`跳转到第 ${visibleRange.start + index + 1} 条用户消息`"
+				:aria-current="item.id === activeId ? 'true' : undefined"
 				@mouseenter="onItemHover($event, item)" @mouseleave="onItemLeave"
 				@focus="onItemHover($event, item)" @blur="onItemLeave"
 				@click="scrollTo(item.id)">
 				<span class="nav-indicator" aria-hidden="true"></span>
+			</button>
+			<button v-if="canScrollDown" type="button" class="nav-step" aria-label="查看更晚的用户消息"
+				@click="stepWindow(1)">
+				<ChevronDown :size="12" :stroke-width="2" aria-hidden="true" />
 			</button>
 		</div>
 
@@ -209,7 +302,7 @@ defineExpose({
 				@mouseenter="onBottomHover($event)" @mouseleave="onItemLeave"
 				@focus="onBottomHover($event)" @blur="onItemLeave"
 				@click="scrollToBottom">
-				<ArrowDown :size="13" :stroke-width="2.2" aria-hidden="true" />
+				<ArrowDown :size="14" :stroke-width="2" aria-hidden="true" />
 			</button>
 		</Transition>
 	</nav>
@@ -218,15 +311,16 @@ defineExpose({
 <style scoped>
 .user-message-nav {
 	position: absolute;
-	right: 12px;
+	right: 28px;
 	top: 50%;
 	transform: translateY(-50%);
 	z-index: 8;
 	pointer-events: auto;
 	display: flex;
 	flex-direction: column;
-	align-items: flex-end;
-	max-height: calc(100% - 96px);
+	align-items: center;
+	/* 点列的固定高度是活跃窗口的容量来源；长会话不再靠内部滚动把 40+ 个点挤进轨道。 */
+	height: min(146px, max(0px, 100% - 160px));
 }
 
 .nav-popover {
@@ -268,99 +362,120 @@ defineExpose({
 .nav-track {
 	display: flex;
 	flex-direction: column;
-	align-items: flex-end;
-	gap: 8px;
-	overflow-y: auto;
-	overflow-x: visible;
-	scrollbar-width: none;
-	padding: 6px 4px;
+	align-items: center;
+	justify-content: center;
+	gap: 2px;
+	width: 20px;
+	height: 100%;
+	min-height: 0;
+	padding: 3px 0;
 }
 
-.nav-track::-webkit-scrollbar {
-	display: none;
-}
-
-.nav-item {
+.nav-item,
+.nav-step {
 	position: relative;
 	display: flex;
 	align-items: center;
-	justify-content: flex-end;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 14px;
+	height: 14px;
 	background: transparent;
 	border: none;
-	padding: 6px 4px;
+	padding: 0;
 	cursor: pointer;
 	outline: none;
-	border-radius: 4px;
+	border-radius: 50%;
 	-webkit-tap-highlight-color: transparent;
+}
+
+.nav-step {
+	color: var(--muted-soft);
+	opacity: 0.75;
+	transition: color 0.18s ease, opacity 0.18s ease;
+}
+
+.nav-step:hover {
+	color: var(--text);
+	opacity: 1;
 }
 
 .nav-indicator {
 	display: block;
-	width: 14px;
-	height: 2.5px;
-	border-radius: 9999px;
-	background: var(--line-solid-strong);
-	opacity: 0.65;
-	transition: width 0.22s var(--ease-out), background-color 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+	box-sizing: border-box;
+	width: 7px;
+	height: 7px;
+	border: 1.5px solid var(--line-solid-strong);
+	border-radius: 50%;
+	background: transparent;
+	opacity: 0.75;
+	transition: border-color 0.18s ease, background-color 0.18s ease, opacity 0.18s ease, transform 0.18s var(--ease-out);
 }
 
 .nav-item:hover .nav-indicator {
-	width: 22px;
-	background: var(--text);
+	border-color: var(--text);
+	background: transparent;
 	opacity: 1;
-	box-shadow: 0 0 8px rgba(var(--shadow-ink), 0.25);
+	transform: scale(1.2);
 }
 
 .nav-item.active .nav-indicator {
-	width: 20px;
+	border-color: var(--accent-base);
 	background: var(--accent-base);
 	opacity: 1;
-	box-shadow: 0 0 6px rgba(var(--shadow-ink), 0.25);
+	transform: scale(1.15);
 }
 
-.nav-item:focus-visible {
+.nav-item.active:hover .nav-indicator {
+	transform: scale(1.25);
+}
+
+.nav-item:focus-visible,
+.nav-step:focus-visible {
 	outline: 2px solid var(--accent-base);
 	outline-offset: 2px;
 }
 
-/* 导航到底部按钮：纯箭头图标，绝对定位在 nav-track 轨道正下方，完全脱离文档流，
-   出现/隐藏绝不改变整个 user-message-nav 的高度，彻底消除居中重算导致的锚点晃动 */
+/* 导航到底部按钮：居中挂在锚点轴正下方，出现/隐藏不改变轨道高度。 */
 .nav-bottom-btn {
 	position: absolute;
 	top: 100%;
-	right: 5px;
-	margin-top: 6px;
+	left: 50%;
+	margin-top: 8px;
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
-	width: 20px;
-	height: 20px;
+	width: 24px;
+	height: 24px;
 	padding: 0;
-	border: none;
-	background: transparent;
-	color: var(--line-solid-strong);
-	opacity: 0.65;
+	border: 1px solid var(--line-card);
+	border-radius: 50%;
+	background: var(--surface-base);
+	box-shadow: 0 3px 10px rgba(var(--shadow-ink), 0.1);
+	color: var(--muted);
 	cursor: pointer;
 	outline: none;
 	flex-shrink: 0;
-	transition: opacity 0.18s ease, color 0.18s ease, transform 0.18s var(--ease-out);
+	transform: translateX(-50%);
+	transition: color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s var(--ease-out);
 }
 
 .user-message-nav:not(:has(.nav-track)) .nav-bottom-btn {
-	position: static;
+	top: 50%;
 	margin-top: 0;
+	transform: translate(-50%, -50%);
 }
 
 .nav-bottom-btn:hover {
-	opacity: 1;
 	color: var(--text);
-	transform: translateY(1.5px);
+	border-color: var(--line-solid-strong);
+	box-shadow: 0 4px 14px rgba(var(--shadow-ink), 0.16);
+	transform: translateX(-50%) translateY(2px);
 }
 
 .nav-bottom-btn:focus-visible {
 	outline: 2px solid var(--accent-base);
 	outline-offset: 2px;
-	border-radius: 4px;
 }
 
 .nav-bottom-fade-enter-active,
@@ -371,7 +486,7 @@ defineExpose({
 .nav-bottom-fade-enter-from,
 .nav-bottom-fade-leave-to {
 	opacity: 0;
-	transform: translateY(-4px);
+	transform: translateX(-50%) translateY(-4px);
 }
 
 @media (max-width: 640px) {
