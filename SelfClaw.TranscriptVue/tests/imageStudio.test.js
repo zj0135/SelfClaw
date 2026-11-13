@@ -380,6 +380,54 @@ describe('useImageStudio', () => {
 		await generating;
 	});
 
+	it('dispatches to image-generation/edit when a reference image is set', async () => {
+		const studio = await mountStudio([MODEL]);
+		studio.prompt.value = 'turn this cat into a dog';
+		studio.referenceImage.value = {
+			name: 'cat.png',
+			url: 'data:image/png;base64,AAAA',
+			base64: 'data:image/png;base64,AAAA',
+		};
+
+		const generating = studio.generate();
+		await settle();
+		const editRequest = lastRequest('image-generation/edit');
+		expect(editRequest).toBeDefined();
+		expect(editRequest.imageBase64).toBe('data:image/png;base64,AAAA');
+		expect(editRequest.prompt).toBe('turn this cat into a dog');
+		expect(editRequest.style).toBeUndefined();
+		expect(editRequest.moderation).toBeUndefined();
+
+		await respond(editRequest, {
+			ok: true,
+			images: [{ id: 'img-edit', url: 'https://generated-images.selfclaw.local/edit.png' }],
+		});
+		await generating;
+
+		expect(studio.gallery).toHaveLength(1);
+		expect(studio.gallery[0].id).toBe('img-edit');
+	});
+
+	it('setReferenceFromImage loads a gallery image into referenceImage and seeds empty prompt', async () => {
+		const studio = await mountStudio([MODEL]);
+		expect(studio.referenceImage.value).toBeNull();
+		expect(studio.prompt.value).toBe('');
+
+		await studio.setReferenceFromImage({
+			id: 'sample-1',
+			url: 'data:image/png;base64,ZZZZ',
+			prompt: 'a futuristic city skyline',
+		});
+
+		expect(studio.referenceImage.value).toMatchObject({
+			url: 'data:image/png;base64,ZZZZ',
+			base64: 'data:image/png;base64,ZZZZ',
+		});
+		expect(studio.referenceImage.value.name).toContain('futuristic');
+		expect(studio.prompt.value).toBe('a futuristic city skyline');
+		expect(studio.statusMessage.value).toBe('已将图片设为参考图');
+	});
+
 	it('encodes a validated custom size in the request', async () => {
 		const studio = await mountStudio([MODEL]);
 		studio.prompt.value = 'a cat';

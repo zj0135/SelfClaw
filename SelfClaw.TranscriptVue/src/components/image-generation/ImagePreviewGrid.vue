@@ -1,13 +1,12 @@
 <script setup>
-import { ref } from 'vue';
+import { computed } from 'vue';
 import {
 	Image as ImageIcon,
 	Minus,
 	Plus,
 	Maximize2,
+	Pencil,
 	Trash2,
-	X,
-	Plus as PlusIcon,
 	Sparkles,
 } from 'lucide-vue-next';
 import { formatGeneratedAt } from '../../renderers/imageStudio.js';
@@ -15,7 +14,6 @@ import { formatGeneratedAt } from '../../renderers/imageStudio.js';
 const props = defineProps({
 	gallery: { type: Array, required: true },
 	zoomLevel: { type: Number, default: 100 },
-	referenceImage: { type: Object, default: null },
 	isGenerating: { type: Boolean, default: false },
 });
 
@@ -25,52 +23,14 @@ const emit = defineEmits([
 	'remove-image',
 	'clear-gallery',
 	'preview-fullscreen',
-	'upload-reference',
-	'clear-reference',
+	'edit-image',
 ]);
 
-const fileInputRef = ref(null);
-const isDragging = ref(false);
-
-function triggerFileInput() {
-	fileInputRef.value?.click();
-}
-
-function onFileSelected(event) {
-	const file = event.target.files?.[0];
-	if (file) {
-		emit('upload-reference', file);
-	}
-	event.target.value = '';
-}
-
-function onDrop(event) {
-	isDragging.value = false;
-	const file = event.dataTransfer?.files?.[0];
-	if (file && file.type.startsWith('image/')) {
-		emit('upload-reference', file);
-	}
-}
-
-function onDragOver(event) {
-	event.preventDefault();
-	isDragging.value = true;
-}
-
-function onDragLeave() {
-	isDragging.value = false;
-}
-
-function onUploadKeydown(event) {
-	if (event.key === 'Enter' || event.key === ' ') {
-		event.preventDefault();
-		triggerFileInput();
-	}
-}
+const cardMinWidth = computed(() => Math.round(200 * (props.zoomLevel / 100)));
 
 function previewAll() {
 	if (props.gallery.length > 0) {
-		emit('preview-fullscreen', props.gallery[0]);
+		emit('preview-fullscreen', { image: props.gallery[0], index: 0 });
 	}
 }
 </script>
@@ -120,9 +80,13 @@ function previewAll() {
 			</div>
 		</div>
 
-		<!-- 网格展示区：zoom 走 CSS zoom 而不是 transform，放大后才会产生真实的滚动范围 -->
+		<!-- 网格展示区：通过自适应卡片最小宽度实现画廊缩放，避免 CSS zoom 导致角标数字畸形放大 -->
 		<div class="grid-viewport">
-			<div class="image-grid" :style="{ zoom: zoomLevel / 100 }">
+			<div
+				class="image-grid"
+				:class="{ 'is-empty': gallery.length === 0 }"
+				:style="{ '--card-min-width': `${cardMinWidth}px` }"
+			>
 				<div
 					v-for="(img, idx) in gallery"
 					:key="img.id || idx"
@@ -146,9 +110,18 @@ function previewAll() {
 							type="button"
 							title="放大查看"
 							aria-label="放大查看"
-							@click.stop="emit('preview-fullscreen', img)"
+							@click.stop="emit('preview-fullscreen', { image: img, index: idx })"
 						>
 							<Maximize2 :size="14" />
+						</button>
+						<button
+							class="overlay-btn"
+							type="button"
+							title="编辑图片"
+							aria-label="编辑图片"
+							@click.stop="emit('edit-image', img)"
+						>
+							<Pencil :size="14" />
 						</button>
 						<button
 							class="overlay-btn danger"
@@ -173,56 +146,6 @@ function previewAll() {
 					<div class="empty-desc">
 						{{ isGenerating ? '完成后结果会出现在这里' : '在右侧填写提示词，点击开始生成' }}
 					</div>
-				</div>
-
-				<!-- 添加图片 / 图生图参考卡片 -->
-				<div
-					class="upload-card"
-					:class="{ dragging: isDragging, 'has-file': Boolean(referenceImage) }"
-					role="button"
-					tabindex="0"
-					:aria-label="referenceImage ? '更换参考图' : '上传参考图'"
-					@click="triggerFileInput"
-					@keydown="onUploadKeydown"
-					@dragover="onDragOver"
-					@dragleave="onDragLeave"
-					@drop.prevent="onDrop"
-				>
-					<input
-						ref="fileInputRef"
-						type="file"
-						accept="image/png,image/jpeg,image/webp"
-						class="hidden-file-input"
-						@change="onFileSelected"
-					/>
-
-					<template v-if="referenceImage">
-						<div class="ref-preview-wrapper" @click.stop>
-							<img :src="referenceImage.url" alt="参考图" class="ref-thumb" />
-							<button
-								class="clear-ref-btn"
-								type="button"
-								title="清除参考图"
-								aria-label="清除参考图"
-								@click="emit('clear-reference')"
-							>
-								<X :size="14" />
-							</button>
-						</div>
-						<div class="ref-info">
-							<span class="ref-title">已载入参考图</span>
-							<span class="ref-name">{{ referenceImage.name }}</span>
-						</div>
-					</template>
-
-					<template v-else>
-						<div class="upload-icon-circle">
-							<PlusIcon :size="20" class="plus-icon" />
-						</div>
-						<div class="upload-title">添加图片</div>
-						<div class="upload-desc">支持拖拽或点击上传</div>
-						<div class="upload-formats">JPG / PNG / WEBP</div>
-					</template>
 				</div>
 			</div>
 		</div>
@@ -348,9 +271,13 @@ function previewAll() {
 
 .image-grid {
 	display: grid;
-	grid-template-columns: repeat(2, minmax(0, 1fr));
+	grid-template-columns: repeat(auto-fill, minmax(min(var(--card-min-width, 200px), 100%), 1fr));
 	gap: 16px;
 	width: 100%;
+}
+
+.image-grid.is-empty {
+	display: flex;
 }
 
 .image-card {
@@ -470,15 +397,16 @@ function previewAll() {
 }
 
 .empty-card {
+	grid-column: 1 / -1;
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
-	aspect-ratio: 1 / 1;
+	min-height: 280px;
 	border-radius: 14px;
 	border: 1px solid var(--line-1, rgba(0, 0, 0, 0.06));
 	background: var(--surface-soft, #f7f8fa);
-	padding: 16px;
+	padding: 32px 16px;
 	text-align: center;
 }
 
@@ -520,127 +448,5 @@ function previewAll() {
 .empty-desc {
 	font-size: 11.5px;
 	color: var(--ink-4, #8a929e);
-}
-
-.upload-card {
-	display: flex;
-	flex-direction: column;
-	align-items: center;
-	justify-content: center;
-	aspect-ratio: 1 / 1;
-	border-radius: 14px;
-	border: 1.5px dashed var(--line-solid-strong, #d8dde5);
-	background: var(--surface-soft, #f7f8fa);
-	cursor: pointer;
-	transition: all 0.2s ease;
-	padding: 16px;
-	text-align: center;
-}
-
-.upload-card:focus-visible {
-	outline: 2px solid var(--accent-base, #3b5bfd);
-	outline-offset: 2px;
-}
-
-.upload-card:hover,
-.upload-card.dragging {
-	border-color: var(--accent-base, #3b5bfd);
-	background: color-mix(in srgb, var(--accent-base, #3b5bfd) 4%, var(--surface-soft, #f7f8fa));
-}
-
-.hidden-file-input {
-	display: none;
-}
-
-.upload-icon-circle {
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	width: 44px;
-	height: 44px;
-	border-radius: 50%;
-	background: var(--surface-base, #ffffff);
-	border: 1px solid var(--line-1, rgba(0, 0, 0, 0.08));
-	color: var(--ink-2, #454c59);
-	margin-bottom: 12px;
-	transition: transform 0.2s;
-}
-
-.upload-card:hover .upload-icon-circle {
-	transform: scale(1.08);
-	color: var(--accent-base, #3b5bfd);
-}
-
-.upload-title {
-	font-size: 14px;
-	font-weight: 600;
-	color: var(--ink-1, #171a1f);
-	margin-bottom: 6px;
-}
-
-.upload-desc {
-	font-size: 12px;
-	color: var(--ink-3, #6b7280);
-	margin-bottom: 4px;
-}
-
-.upload-formats {
-	font-size: 11px;
-	font-weight: 500;
-	color: var(--ink-4, #8a929e);
-	letter-spacing: 0.5px;
-}
-
-.ref-preview-wrapper {
-	position: relative;
-	width: 80px;
-	height: 80px;
-	border-radius: 10px;
-	overflow: hidden;
-	margin-bottom: 10px;
-	border: 1px solid var(--line-card, #e3e6ec);
-}
-
-.ref-thumb {
-	width: 100%;
-	height: 100%;
-	object-fit: cover;
-}
-
-.clear-ref-btn {
-	position: absolute;
-	top: 4px;
-	right: 4px;
-	width: 20px;
-	height: 20px;
-	border-radius: 50%;
-	background: rgba(0, 0, 0, 0.65);
-	color: #fff;
-	border: none;
-	display: flex;
-	align-items: center;
-	justify-content: center;
-	cursor: pointer;
-}
-
-.ref-info {
-	display: flex;
-	flex-direction: column;
-	gap: 2px;
-}
-
-.ref-title {
-	font-size: 13px;
-	font-weight: 600;
-	color: var(--accent-base, #3b5bfd);
-}
-
-.ref-name {
-	font-size: 11px;
-	color: var(--ink-3, #6b7280);
-	max-width: 140px;
-	overflow: hidden;
-	text-overflow: ellipsis;
-	white-space: nowrap;
 }
 </style>

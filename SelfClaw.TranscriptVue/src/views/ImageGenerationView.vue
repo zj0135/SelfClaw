@@ -13,6 +13,7 @@ import { useImageStudio } from '../composables/useImageStudio.js';
 import ImagePreviewGrid from '../components/image-generation/ImagePreviewGrid.vue';
 import ImageModelPicker from '../components/image-generation/ImageModelPicker.vue';
 import ImagePromptSection from '../components/image-generation/ImagePromptSection.vue';
+import ImageReferenceSection from '../components/image-generation/ImageReferenceSection.vue';
 import ImageSizeSelector from '../components/image-generation/ImageSizeSelector.vue';
 import ImageSliderControls from '../components/image-generation/ImageSliderControls.vue';
 import ImageAdvancedOptions from '../components/image-generation/ImageAdvancedOptions.vue';
@@ -58,18 +59,33 @@ const {
 	clearGallery,
 	setZoom,
 	setReferenceImageFile,
+	setReferenceFromImage,
 	clearReferenceImage,
 	generate,
 	cancel,
 } = useImageStudio();
 
-function handlePreviewFullscreen(image) {
-	if (image?.url) {
-		emit('preview-image', {
-			src: image.url,
-			alt: image.prompt || '生成的图片',
-		});
-	}
+function handlePreviewFullscreen(payload) {
+	const image = payload?.image || payload;
+	const currentUrl = image?.url || image?.src;
+	if (!currentUrl) return;
+
+	const allImages = gallery.map((item) => ({
+		src: item.url,
+		alt: item.prompt || '生成的图片',
+	}));
+
+	const foundIndex = gallery.findIndex((item) => (image?.id && item.id === image.id) || item.url === currentUrl);
+	const index = typeof payload?.index === 'number'
+		? payload.index
+		: Math.max(0, foundIndex);
+
+	emit('preview-image', {
+		src: currentUrl,
+		alt: image.prompt || '生成的图片',
+		images: allImages,
+		index,
+	});
 }
 
 function handleKeydown(event) {
@@ -100,15 +116,13 @@ onBeforeUnmount(() => {
 				<ImagePreviewGrid
 					:gallery="gallery"
 					:zoom-level="zoomLevel"
-					:reference-image="referenceImage"
 					:is-generating="isGenerating"
 					@zoom-in="setZoom(10)"
 					@zoom-out="setZoom(-10)"
 					@remove-image="removeImage"
 					@clear-gallery="clearGallery"
 					@preview-fullscreen="handlePreviewFullscreen"
-					@upload-reference="setReferenceImageFile"
-					@clear-reference="clearReferenceImage"
+					@edit-image="setReferenceFromImage"
 				/>
 			</section>
 
@@ -137,6 +151,12 @@ onBeforeUnmount(() => {
 						<ImagePromptSection
 							v-model:prompt="prompt"
 							:max-prompt-length="maxPromptLength"
+						/>
+
+						<ImageReferenceSection
+							:reference-image="referenceImage"
+							@upload-reference="setReferenceImageFile"
+							@clear-reference="clearReferenceImage"
 						/>
 
 						<ImageSizeSelector

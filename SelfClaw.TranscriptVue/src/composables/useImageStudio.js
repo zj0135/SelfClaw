@@ -217,6 +217,48 @@ export function useImageStudio() {
 		referenceImage.value = null;
 	}
 
+	async function urlToBase64(url) {
+		if (!url || typeof fetch !== 'function') return '';
+		if (url.startsWith('data:')) return url;
+		try {
+			const res = await fetch(url);
+			if (!res.ok) return '';
+			const blob = await res.blob();
+			return await new Promise((resolve, reject) => {
+				const reader = new FileReader();
+				reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
+				reader.onerror = reject;
+				reader.readAsDataURL(blob);
+			});
+		} catch (error) {
+			console.warn('[ImageStudio] Failed to load image as base64:', error);
+			return '';
+		}
+	}
+
+	async function setReferenceFromImage(image) {
+		if (!image?.url) return;
+		const name = image.name || (image.prompt ? `${image.prompt.slice(0, 30).trim()}.png` : '生成图.png');
+		const directBase64 = image.base64 || (image.url.startsWith('data:') ? image.url : '');
+		referenceImage.value = {
+			name,
+			url: image.url,
+			base64: directBase64,
+		};
+		if (!prompt.value.trim() && image.prompt) {
+			prompt.value = image.prompt;
+		}
+		statusMessage.value = '已将图片设为参考图';
+		errorMessage.value = '';
+
+		if (!directBase64) {
+			const loaded = await urlToBase64(image.url);
+			if (referenceImage.value?.url === image.url && loaded) {
+				referenceImage.value.base64 = loaded;
+			}
+		}
+	}
+
 	function appendImages(images, promptText) {
 		const created = images
 			.filter((item) => item?.url)
@@ -279,6 +321,16 @@ export function useImageStudio() {
 		activeJobId.value = `image-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 		try {
+			if (referenceImage.value && !referenceImage.value.base64) {
+				const converted = await urlToBase64(referenceImage.value.url);
+				if (converted) {
+					referenceImage.value.base64 = converted;
+				} else {
+					errorMessage.value = '参考图加载失败，请重新选择参考图';
+					return;
+				}
+			}
+
 			const resolvedSize = customSizeRules.value && selectedSize.value === 'custom'
 				? `${customWidth.value}x${customHeight.value}`
 				: currentSize.value?.value;
@@ -380,6 +432,7 @@ export function useImageStudio() {
 		clearGallery,
 		setZoom,
 		setReferenceImageFile,
+		setReferenceFromImage,
 		clearReferenceImage,
 		generate,
 		cancel,

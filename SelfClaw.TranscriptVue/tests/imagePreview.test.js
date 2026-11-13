@@ -75,3 +75,48 @@ it('closes on Escape and on the host dismiss push', async () => {
 	expect(preview.preview.value).toBeNull();
 	expect(posted.filter((message) => message.type === 'image-preview/close')).toHaveLength(2);
 });
+
+it('supports navigating between multiple images and handles boundary conditions', async () => {
+	const preview = await mountPreview();
+
+	preview.open({
+		src: 'img-2.png',
+		index: 1,
+		images: [
+			{ src: 'img-1.png', alt: 'first' },
+			{ src: 'img-2.png', alt: 'second' },
+			{ src: 'img-3.png', alt: 'third' },
+		],
+	});
+
+	expect(preview.currentIndex.value).toBe(1);
+	expect(preview.totalCount.value).toBe(3);
+	expect(preview.hasPrev.value).toBe(true);
+	expect(preview.hasNext.value).toBe(true);
+	expect(preview.preview.value).toMatchObject({ src: 'img-2.png', alt: 'second', total: 3, index: 1 });
+
+	// 下一张
+	preview.next();
+	expect(preview.currentIndex.value).toBe(2);
+	expect(preview.preview.value).toMatchObject({ src: 'img-3.png', alt: 'third' });
+	expect(preview.hasNext.value).toBe(false);
+
+	// 再次调用 next 不越界
+	preview.next();
+	expect(preview.currentIndex.value).toBe(2);
+
+	// 上一张
+	preview.prev();
+	expect(preview.currentIndex.value).toBe(1);
+
+	// 键盘左箭头
+	document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));
+	expect(preview.currentIndex.value).toBe(0);
+	expect(preview.preview.value).toMatchObject({ src: 'img-1.png', alt: 'first' });
+	expect(preview.hasPrev.value).toBe(false);
+
+	// 键盘右箭头
+	document.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+	expect(preview.currentIndex.value).toBe(1);
+	expect(preview.preview.value).toMatchObject({ src: 'img-2.png', alt: 'second' });
+});
