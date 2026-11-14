@@ -41,6 +41,27 @@ describe('UserMessageNav', () => {
 		expect(wrapper.find('.user-message-nav').exists()).toBe(false);
 	});
 
+	it('hides the whole navigation when there is only one user message and nothing to scroll back to', () => {
+		const wrapper = mount(UserMessageNav, {
+			props: { items: userItems(1) },
+		});
+		mounted.push(wrapper);
+
+		expect(wrapper.find('.user-message-nav').exists()).toBe(false);
+		expect(wrapper.find('.nav-track').exists()).toBe(false);
+		expect(wrapper.find('.nav-item').exists()).toBe(false);
+	});
+
+	it('renders the navigation track from two user messages onwards', () => {
+		const wrapper = mount(UserMessageNav, {
+			props: { items: userItems(2) },
+		});
+		mounted.push(wrapper);
+
+		expect(wrapper.find('.nav-track').exists()).toBe(true);
+		expect(wrapper.findAll('.nav-item')).toHaveLength(2);
+	});
+
 	it('renders exactly two hollow circular indicators for two rounds of user messages', () => {
 		const items = [
 			{
@@ -80,7 +101,7 @@ describe('UserMessageNav', () => {
 
 	it('uses a circular, anchor-aligned scroll-to-bottom button and keeps the ArrowDown icon', () => {
 		const buttonBlock = componentSource.match(/\.nav-bottom-btn \{[\s\S]*?\}/)?.[0] ?? '';
-		const noTrackBlock = componentSource.match(/\.user-message-nav:not\(:has\(\.nav-track\)\) \.nav-bottom-btn \{[\s\S]*?\}/)?.[0] ?? '';
+		const noTrackBlock = componentSource.match(/\.user-message-nav\.nav-bottom-only \.nav-bottom-btn \{[\s\S]*?\}/)?.[0] ?? '';
 
 		expect(buttonBlock).toContain('left: 50%');
 		expect(buttonBlock).toContain('transform: translateX(-50%)');
@@ -88,6 +109,16 @@ describe('UserMessageNav', () => {
 		expect(buttonBlock).toContain('background: var(--surface-base)');
 		expect(noTrackBlock).toContain('transform: translate(-50%, -50%)');
 		expect(componentSource).toContain('<ArrowDown');
+	});
+
+	// 点列被隐藏时 nav 的宽度不能被内容带走：left: 50% 的按钮靠它定轴，宽度塌成 0 就会水平漂移。
+	it('pins the anchor column width so hiding the track cannot move the scroll-to-bottom button', () => {
+		const navBlock = componentSource.match(/\.user-message-nav \{[\s\S]*?\}/)?.[0] ?? '';
+
+		expect(navBlock).toContain('width: 20px');
+		// 居中只属于「完全没有锚点」，不能再用 :has(.nav-track) 把单锚点也判成居中。
+		expect(componentSource).not.toContain(':not(:has(.nav-track))');
+		expect(componentSource).toContain('.nav-bottom-only');
 	});
 
 	it('uses compact hollow dots, fills only the active dot and keeps the track height bounded', () => {
@@ -115,6 +146,11 @@ describe('UserMessageNav', () => {
 				attachments: [
 					{ fileName: 'screenshot.png', mediaType: 'image/png', sourceUrl: 'https://example.com/screenshot.png' },
 				],
+			},
+			{
+				id: 'u2',
+				role: 'user',
+				segments: [{ kind: 'content', markdown: '第二轮提问' }],
 			},
 		];
 
@@ -146,6 +182,11 @@ describe('UserMessageNav', () => {
 				attachments: [
 					{ fileName: 'photo.png', mediaType: 'image/png', sourceUrl: 'https://example.com/photo.png' },
 				],
+			},
+			{
+				id: 'u2',
+				role: 'user',
+				segments: [{ kind: 'content', markdown: '第二轮提问' }],
 			},
 		];
 

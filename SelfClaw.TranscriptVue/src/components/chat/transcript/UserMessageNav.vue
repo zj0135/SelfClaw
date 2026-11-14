@@ -30,6 +30,10 @@ let currentScrollContainer = null;
 let trackResizeObserver = null;
 
 const navItems = computed(() => extractUserNavItems(props.items));
+// 单个锚点点列无法表达「上下翻页」，反而挡住正文右侧，所以只有一个用户消息时不渲染点列。
+// 「定位到底部」服务于滚动位置而非锚点，必须独立于点列继续可用。
+const showTrack = computed(() => navItems.value.length > 1);
+const showNav = computed(() => showTrack.value || showScrollBottom.value);
 const activeIndex = computed(() => navItems.value.findIndex((item) => item.id === activeId.value));
 const trackCapacity = computed(() => Math.max(1, Math.floor((trackHeight.value - TRACK_PADDING_PX) / DOT_STRIDE_PX)));
 const visibleRange = computed(() => {
@@ -241,7 +245,15 @@ watch(() => props.items, () => {
 		} else {
 			updateActive();
 		}
-		if (trackEl.value && !trackResizeObserver) {
+		// 点列被隐藏时（只剩一个用户消息）不能继续观察已经卸载的 nav 元素，
+		// 否则后续再出现第二个用户消息时会沿用失效的 observer。
+		if (!trackEl.value) {
+			trackResizeObserver?.disconnect();
+			trackResizeObserver = null;
+			trackHeight.value = MAX_TRACK_HEIGHT_PX;
+			return;
+		}
+		if (!trackResizeObserver) {
 			observeTrack();
 		} else {
 			measureTrack();
@@ -269,14 +281,15 @@ defineExpose({
 </script>
 
 <template>
-	<nav v-if="navItems.length > 0 || showScrollBottom" class="user-message-nav" aria-label="用户消息导航">
+	<nav v-if="showNav" class="user-message-nav" :class="{ 'nav-bottom-only': navItems.length === 0 }"
+		aria-label="用户消息导航">
 		<!-- 悬浮弹框：固定最大宽度，超出文本显示省略号 -->
 		<div v-if="popoverText" class="nav-popover" :style="{ top: `${hoverTop}px` }"
 			role="tooltip">
 			{{ popoverText }}
 		</div>
 
-		<div v-if="navItems.length > 0" ref="trackEl" class="nav-track"
+		<div v-if="showTrack" ref="trackEl" class="nav-track"
 			:aria-label="`用户消息导航，共 ${visibleRange.total} 轮，当前显示第 ${visibleRange.start + 1} 到 ${visibleRange.end} 轮`"
 			@wheel="onTrackWheel">
 			<button v-if="canScrollUp" type="button" class="nav-step" aria-label="查看更早的用户消息"
@@ -321,6 +334,9 @@ defineExpose({
 	align-items: center;
 	/* 点列的固定高度是活跃窗口的容量来源；长会话不再靠内部滚动把 40+ 个点挤进轨道。 */
 	height: min(146px, max(0px, 100% - 160px));
+	/* 宽度必须自己钉住而不是由点列撑开：点列被隐藏时（只剩一个锚点）宽度塌成 0，
+	   会让 left: 50% 的「定位到底部」按钮水平偏移半列。 */
+	width: 20px;
 }
 
 .nav-popover {
@@ -460,10 +476,16 @@ defineExpose({
 	transition: color 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s var(--ease-out);
 }
 
-.user-message-nav:not(:has(.nav-track)) .nav-bottom-btn {
+/* 完全没有锚点时（纯「定位到底部」）按钮升到锚点轴中央。只有一个锚点时点列虽被隐藏，
+   按钮仍留在轨道正下方的原位——隐藏点列不应改变按钮坐标。 */
+.user-message-nav.nav-bottom-only .nav-bottom-btn {
 	top: 50%;
 	margin-top: 0;
 	transform: translate(-50%, -50%);
+}
+
+.user-message-nav.nav-bottom-only .nav-bottom-btn:hover {
+	transform: translate(-50%, -50%) translateY(2px);
 }
 
 .nav-bottom-btn:hover {

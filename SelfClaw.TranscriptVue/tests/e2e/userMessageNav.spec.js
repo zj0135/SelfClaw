@@ -11,6 +11,85 @@ const userItems = Array.from({ length: 40 }, (_, index) => ({
 	segments: [{ kind: 'content', markdown: `第 ${index + 1} 轮提问` }],
 }));
 
+const singleUserItems = [
+	{
+		id: 'u1',
+		kind: 'message',
+		role: 'user',
+		status: 'completed',
+		timestamp: '12:00',
+		segments: [{ kind: 'content', markdown: '只有一个用户消息' }],
+	},
+	{
+		id: 'a1',
+		kind: 'message',
+		role: 'assistant',
+		status: 'completed',
+		timestamp: '12:01',
+		segments: [{ kind: 'content', markdown: 'Transcript line.\n\n'.repeat(60) }],
+	},
+];
+
+const assistantOnlyItems = [
+	{
+		id: 'a1',
+		kind: 'message',
+		role: 'assistant',
+		status: 'completed',
+		timestamp: '12:01',
+		segments: [{ kind: 'content', markdown: 'Transcript line.\n\n'.repeat(60) }],
+	},
+];
+
+// 滚到顶以唤出「定位到底部」按钮，再读取锚点列的几何。
+async function navGeometry(page, items) {
+	await page.evaluate((payload) => window.activityFixture.transcript(undefined, payload), items);
+	await page.locator('#transcript-scroll').evaluate((element) => {
+		element.scrollTop = 0;
+		element.dispatchEvent(new Event('scroll'));
+	});
+	await page.waitForTimeout(300);
+	return page.evaluate(() => {
+		const rect = (selector) => {
+			const element = document.querySelector(selector);
+			if (!element) return null;
+			const { left, right, top, bottom, width, height } = element.getBoundingClientRect();
+			return { left, right, top, bottom, width, height };
+		};
+		return {
+			nav: rect('.user-message-nav'),
+			track: rect('.nav-track'),
+			bottomButton: rect('.nav-bottom-btn'),
+			visibleDots: document.querySelectorAll('.nav-item').length,
+		};
+	});
+}
+
+// 只有一个用户消息时点列没有意义（无法表达上下翻页），整列隐藏；但「定位到底部」必须原地不动。
+test('单个用户消息时隐藏点列，回到底部按钮坐标不变', async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 800 });
+	await page.addInitScript(installActivityHost);
+	await page.goto('/');
+	await page.evaluate((items) => window.activityFixture.transcript(undefined, items), userItems);
+	await expect(page.locator('.transcript-panel')).toBeVisible();
+
+	const multi = await navGeometry(page, userItems);
+	const single = await navGeometry(page, singleUserItems);
+
+	expect(multi.visibleDots).toBeGreaterThan(1);
+	expect(single.track).toBeNull();
+	expect(single.visibleDots).toBe(0);
+	// 点列消失不能把按钮挤到别处：两者坐标必须在 1px 内一致。
+	expect(Math.abs(single.bottomButton.left - multi.bottomButton.left)).toBeLessThanOrEqual(1);
+	expect(Math.abs(single.bottomButton.top - multi.bottomButton.top)).toBeLessThanOrEqual(1);
+
+	// 完全没有锚点时（纯 assistant 会话）按钮才升到锚点轴中央。
+	const none = await navGeometry(page, assistantOnlyItems);
+	expect(none.track).toBeNull();
+	expect(Math.abs(none.bottomButton.left - multi.bottomButton.left)).toBeLessThanOrEqual(1);
+	expect(none.bottomButton.top).toBeLessThan(single.bottomButton.top);
+});
+
 test('锚点与悬浮框及回到底部按钮同轴，长会话只显示有界窗口', async ({ page }) => {
 	await page.setViewportSize({ width: 1280, height: 800 });
 	await page.addInitScript(installActivityHost);
