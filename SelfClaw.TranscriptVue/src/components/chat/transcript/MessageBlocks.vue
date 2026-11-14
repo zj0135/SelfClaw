@@ -16,14 +16,14 @@ const blocks = computed(() => buildRenderBlocks(props.item));
 	<div class="message-blocks" :class="{ compact }">
 		<template v-for="block in blocks" :key="block.key">
 			<ThinkingBlock v-if="block.type === 'thinking'" :data-activity-block-id="compact ? block.key : null" :id="block.id" :item="item" :segment="block.segment"
-				:is-last="block.isLast" :open="collapse.isThinkingOpen(block.id)" @toggle="collapse.toggleThinking(block.id)"
+				:is-last="block.isLast" :open="collapse.isThinkingOpen(block.id, block.isActive)" @toggle="collapse.toggleThinking(block.id, block.isActive)"
 				@preview-image="emit('preview-image', $event)" />
 			<TodoCard v-else-if="block.type === 'todo'" :data-activity-block-id="compact ? block.key : null" :id="block.key"
-				:segment="block.segment" :open="collapse.isTodoOpen(block.key)"
-				@toggle="collapse.toggleTodo(block.key)" />
+				:segment="block.segment" :open="collapse.isTodoOpen(block.key, false)"
+				@toggle="collapse.toggleTodo(block.key, false)" />
 			<ToolGroup v-else-if="block.type === 'tool-group'" :data-activity-block-id="compact ? block.key : null" :block="block" :collapse="collapse" />
 			<ToolCard v-else-if="block.type === 'tool'" :data-activity-block-id="compact ? block.key : null" :id="block.id" :segment="block.segment" :summary-label="block.summaryLabel"
-				:open="collapse.isToolOpen(block.id)" @toggle="collapse.toggleTool(block.id)" />
+				:open="collapse.isToolOpen(block.id, false)" @toggle="collapse.toggleTool(block.id, false)" />
 			<BodySegment v-else :data-activity-block-id="compact ? block.key : null" :item="item" :segment="block.segment" :is-first="block.isFirst" :is-last="block.isLast"
 				@preview-image="emit('preview-image', $event)" />
 		</template>

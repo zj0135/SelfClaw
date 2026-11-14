@@ -1,4 +1,4 @@
-﻿import { test, expect } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { installActivityHost } from '../fixtures/activityHost.js';
 
 test.beforeEach(async ({ page }) => {
@@ -40,7 +40,10 @@ test('streaming detail, tool completion, reload, and parent isolation', async ({
 	page.on('pageerror', (error) => errors.push(error.message));
 	await page.locator('.task-detail .thinking-summary').click();
 	await expect(page.locator('.task-detail .thinking-content')).toContainText('Reasoning for');
+	// 单个工具默认折叠；点开后详情可见，完成后仍保持展开（手动优先）。
+	await expect(page.locator('.task-detail .tool-details')).toHaveCount(0);
 	await page.locator('.task-detail .tool-summary').click();
+	await expect(page.locator('.task-detail .tool-details')).toContainText('example.cs');
 	await page.evaluate(() => window.activityFixture.text(' **new tokens** <img src=x onerror="window.injected=true">'));
 	await expect(page.locator('.task-detail .body-segment')).toContainText('new tokens');
 	await page.evaluate(() => window.activityFixture.finish());
@@ -174,6 +177,8 @@ for (const viewport of [{ width: 1920, height: 1080 }, { width: 1280, height: 80
 	test(`dock stays inside the viewport at ${viewport.width}x${viewport.height}`, async ({ page }) => {
 		await page.setViewportSize(viewport);
 		await expect(page.locator('.task-detail .thinking-summary')).toBeVisible();
+		// 完成的思考块默认折叠；点击展开不应破坏 dock 的视口边界。
+		await expect(page.locator('.task-detail .thinking-content')).toHaveCount(0);
 		await page.locator('.task-detail .thinking-summary').click();
 		await expect(page.locator('.task-detail .body-segment')).toContainText('Partial answer');
 		const bounds = await page.evaluate(() => {

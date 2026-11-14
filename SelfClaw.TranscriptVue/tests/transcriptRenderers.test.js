@@ -5,7 +5,43 @@ import {
 	buildToolActionSummary,
 	extractUserMessageText,
 	extractUserNavItems,
+	isThinkingActive,
+	isToolActive,
 } from '../src/renderers/transcript.js';
+
+describe('phase helpers', () => {
+	it('treats only the pending thinking segment of a live message as active', () => {
+		const live = { isThinking: true };
+		expect(isThinkingActive(live, { isPending: true })).toBe(true);
+		expect(isThinkingActive(live, { isPending: false })).toBe(false);
+		expect(isThinkingActive({ isThinking: false }, { isPending: true })).toBe(false);
+	});
+
+	it('treats running and awaiting-approval tools as active', () => {
+		expect(isToolActive({ status: 'running' })).toBe(true);
+		expect(isToolActive({ status: 'awaitingapproval' })).toBe(true);
+		expect(isToolActive({ status: 'completed', isPending: true })).toBe(true);
+		expect(isToolActive({ status: 'completed' })).toBe(false);
+		expect(isToolActive({ status: 'failed' })).toBe(false);
+		expect(isToolActive(null)).toBe(false);
+	});
+
+	it('keeps a tool group id stable while members append during streaming', () => {
+		const first = buildRenderBlocks({ id: 'm', segments: [
+			{ kind: 'tool', segmentId: 't1', status: 'running' }, { kind: 'tool', segmentId: 't2', status: 'running' },
+		] });
+		const second = buildRenderBlocks({ id: 'm', segments: [
+			{ kind: 'tool', segmentId: 't1', status: 'completed' }, { kind: 'tool', segmentId: 't2', status: 'completed' },
+			{ kind: 'tool', segmentId: 't3', status: 'running' },
+		] });
+		expect(first[0].id).toBe('m:tool-group:t1');
+		expect(second[0].id).toBe(first[0].id);
+		expect(first[0].isActive).toBe(true);
+		expect(buildRenderBlocks({ id: 'm', segments: [
+			{ kind: 'tool', segmentId: 't1', status: 'completed' }, { kind: 'tool', segmentId: 't2', status: 'completed' },
+		] })[0].isActive).toBe(false);
+	});
+});
 
 describe('toolStatusLabel', () => {
 	it('labels completed explicitly and passes unknown statuses through', () => {

@@ -84,14 +84,16 @@ it('applies and ACKs the correlated first snapshot, streams shared blocks, and c
 	wrapper = await mountVisiblePane();
 	expect(window.activityFixture.requests.some((request) => request.type === 'activity-panel/rendered')).toBe(true);
 	expect(wrapper.find('.thinking-summary').exists()).toBe(true);
-	expect(wrapper.find('.thinking-content').text()).toContain('Reasoning for');
-	await wrapper.find('.tool-summary').trigger('click');
+	// 已完成的思考块与单个工具都默认折叠。
+	expect(wrapper.find('.thinking-content').exists()).toBe(false);
+	expect(wrapper.find('.tool-details').exists()).toBe(false);
 	window.activityFixture.text(' grows');
 	await flushPromises();
 	await vi.waitFor(() => expect(wrapper.find('.body-segment').text()).toContain('grows'));
 	window.activityFixture.finish();
 	await flushPromises();
 	expect(wrapper.find('.tool-block').classes()).toContain('completed');
+	await wrapper.find('.tool-summary').trigger('click');
 	expect(wrapper.find('.tool-details').text()).toContain('Recorded tool result');
 	expect(wrapper.find('.task-cancel').exists()).toBe(false);
 	await choose(1);
@@ -118,13 +120,14 @@ it('applies and ACKs the correlated first snapshot, streams shared blocks, and c
 
 it('preserves thinking expansion after switching tasks and does not nest buttons', async () => {
 	wrapper = await mountVisiblePane();
-	expect(wrapper.find('.thinking-content').exists()).toBe(true);
+	// 完成的思考块默认折叠，点开后按 id 记住，切任务再回来仍展开。
+	expect(wrapper.find('.thinking-content').exists()).toBe(false);
 	await wrapper.find('.thinking-summary').trigger('click');
-	expect(wrapper.find('.thinking-content').exists()).toBe(false);
-	await choose(1);
 	expect(wrapper.find('.thinking-content').exists()).toBe(true);
-	await choose(0);
+	await choose(1);
 	expect(wrapper.find('.thinking-content').exists()).toBe(false);
+	await choose(0);
+	expect(wrapper.find('.thinking-content').exists()).toBe(true);
 	expect(wrapper.findAll('button button')).toHaveLength(0);
 });
 

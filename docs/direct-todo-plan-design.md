@@ -448,7 +448,7 @@ styles/todo-plan.css                         共享视觉，scoped 内 @import
 ```
 
 - 图标全部 `lucide-vue-next`；无 emoji、无手写 SVG。
-- `useTranscriptCollapse` 增加 todo 开合集合，`collapseAll` 一并清理。
+- `useTranscriptCollapse` 持有 todo 开合状态（现为统一的 per-id overrides 表，见 `docs/message-segments-system-design.md` §5.1）。
 - 内容按纯文本渲染（`{{ }}`），不解析 markdown。
 - 可达性：折叠头 `aria-expanded` + `aria-controls`；进度 `role="status" aria-live="polite"`；列表 `ul/li`。
 - 动效：`TransitionGroup` 处理条目状态变化；dock 出没与审批栏同为 160 ms 位移+透明度；`prefers-reduced-motion` 全关。

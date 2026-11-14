@@ -165,6 +165,10 @@ CREATE TABLE message_segments (
 - `TranscriptToolRunPresenter` 仅保留 `BuildToolSegment` 及其摘要/详情格式化；`BuildToolRunsByMessageId`、`InsertToolSegments`、`ResolveInsertionIndex` 删除；
 - 消息缓存 fingerprint 纳入 segments（块数量 + 各块文本 hash + tool 状态）。
 
+### 5.1 Vue 折叠默认
+
+`buildRenderBlocks` 为每个块派生 `isActive`（思考：`isPending && item.isThinking`；tool group：任一成员为 running / awaitingapproval 或 `isPending`），`MessageBlocks` 把它作为自动默认传给 `useTranscriptCollapse`：思考块与 tool group **进行中展开、完成后折叠**；单个 tool **默认折叠，不随阶段自动开合**；tool group 内的成员同样默认折叠（只展开 group 本身）；todo 卡保持折叠。用户点过的块按稳定 id 记入 overrides，此后手动选择优先于自动默认；组 id 只由首成员派生，流式追加成员时不会漂移。
+
 ## 6. 模型历史回放（DirectHistoryReplay）
 
 assistant 消息按块构造 M.E.AI 原生 content parts，替代整段 markdown 文本：

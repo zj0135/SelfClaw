@@ -2,6 +2,17 @@ import { toolStatusLabel } from './shared';
 
 export { toolStatusLabel };
 
+// ── 进行中判定：折叠自动默认的唯一来源 ────────────────────────────
+// 宿主把「流式消息的最后一块」标为 isPending；思考块一旦不再是最后一块即已收尾。
+// isThinking 单看消息是否仍在流式，不能单独用来判定某个思考块还在进行。
+export function isThinkingActive(item, segment) {
+	return Boolean(segment?.isPending && item?.isThinking);
+}
+
+export function isToolActive(segment) {
+	return segment?.status === 'running' || segment?.status === 'awaitingapproval' || Boolean(segment?.isPending);
+}
+
 // ── segment 归一化 ────────────────────────────────────────────────
 export function getMessageSegments(item) {
 	return Array.isArray(item.segments) ? item.segments : [];
@@ -10,14 +21,10 @@ export function getMessageSegments(item) {
 // ── 稳定 id 派生 ──────────────────────────────────────────────────
 // thinking 用出现序 ordinal（markdown 只追加、切分确定，序号稳定）；
 // tool 单卡优先用后端稳定的 segmentId（= toolRun.Id）；
-// tool group 由首尾成员的 segmentId 派生，消除旧的 index-range 漂移。
+// tool group 由首成员的稳定 segmentId 派生，流式追加成员时 id 不变。
 export const thinkingBlockId = (messageId, ordinal) => `${messageId}:thinking:${ordinal}`;
 export const toolSegmentId = (messageId, segment, index) => segment.segmentId || `${messageId}:tool:${index}`;
-export const toolGroupId = (messageId, members) => {
-	const first = members[0]?.id ?? 'x';
-	const last = members[members.length - 1]?.id ?? 'x';
-	return `${messageId}:tool-group:${first}:${last}`;
-};
+export const toolGroupId = (messageId, members) => `${messageId}:tool-group:${members[0]?.id ?? 'x'}`;
 
 // ── 工具类型/摘要的领域逻辑 ───────────────────────────────────────
 // 汇总行（连续多次调用折叠成一行）用中文描述，单个工具行仍用宿主的工具名 + 目标。
@@ -140,6 +147,7 @@ export function buildRenderBlocks(item) {
 				key: segment.segmentId || thinkingBlockId(item.id, thinkingOrdinal),
 				id: segment.segmentId || thinkingBlockId(item.id, thinkingOrdinal),
 				segment,
+				isActive: isThinkingActive(item, segment),
 				isLast: index === total - 1,
 			});
 			thinkingOrdinal += 1;
@@ -179,6 +187,7 @@ export function buildRenderBlocks(item) {
 					id: toolGroupId(item.id, members),
 					members,
 					status: resolveToolGroupStatus(toolSegments),
+					isActive: toolSegments.some(isToolActive),
 					summaryLabel: buildToolActionSummary(toolSegments),
 					isFirst,
 					isLast,

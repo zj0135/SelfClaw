@@ -4,6 +4,7 @@ import { Sparkles, ChevronRight } from 'lucide-vue-next';
 import { useStreamingContent } from '../../../composables/useStreamingContent.js';
 import { renderMarkdown } from '../../../renderers/markdown.js';
 import { resolvePreviewImage } from '../../../renderers/previewImage.js';
+import { isThinkingActive } from '../../../renderers/transcript.js';
 
 const props = defineProps({
 	id: { type: String, required: true },
@@ -18,7 +19,7 @@ const contentContainerRef = ref(null);
 
 // 复刻旧 renderThinkingSegment 的判定：有内容才可展开；无内容但仍在思考时显示被动占位。
 const isPending = () => Boolean(props.segment.isPending);
-const isLive = () => isPending() && props.item.isThinking;
+const isLive = () => isThinkingActive(props.item, props.segment);
 const hasContent = () => Boolean(props.segment.markdown);
 const shouldRender = () => hasContent() || isLive();
 const label = () => (isLive() ? '思考中...' : '思考过程');
