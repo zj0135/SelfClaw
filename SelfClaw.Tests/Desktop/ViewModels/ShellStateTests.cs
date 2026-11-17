@@ -181,6 +181,29 @@ public sealed class ShellStateTests
             context.Inputs.Submissions.Should().ContainSingle().Which.ConversationId.Should().Be(first.Id);
         });
 
+    [Fact]
+    public Task Window_title_follows_the_selected_conversation_and_falls_back_to_the_app_name()
+        => WpfDispatcherTest.RunAsync(async () =>
+        {
+            using var context = new ShellContext();
+            var conversation = await context.AddConversationAsync("build");
+            await context.ViewModel.InitializeAsync();
+
+            // 没有选中会话时任务栏需要一个恒定名字：空标题会被系统显示成 exe 文件名。
+            context.ViewModel.WindowTitle.Should().Be("SelfClaw");
+
+            await context.ViewModel.SelectConversationAsync(conversation.Id);
+            context.ViewModel.WindowTitle.Should().Be("Target conversation - SelfClaw");
+
+            // 重命名是任务栏最容易落后的一步：标题只改库里的 title，会话 id 不变。
+            await context.ViewModel.RenameConversationAsync(conversation.Id, "Renamed for the taskbar");
+            context.ViewModel.WindowTitle.Should().Be("Renamed for the taskbar - SelfClaw");
+
+            // 新对话回到应用名，不能残留上一条会话的标题。
+            await context.ViewModel.StartNewConversationAsync(keepWorkspace: true);
+            context.ViewModel.WindowTitle.Should().Be("SelfClaw");
+        });
+
     private sealed class ShellContext : IDisposable
     {
         private readonly string _root = Path.Combine(Path.GetTempPath(), "SelfClawTests", Guid.NewGuid().ToString("N"));

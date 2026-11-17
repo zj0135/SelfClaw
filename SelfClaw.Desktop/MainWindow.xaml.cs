@@ -345,6 +345,14 @@ public sealed partial class MainWindow : Window
 
     private async void OnViewModelPropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
     {
+        // 空属性名是 ViewModel 的「整体失效」广播（PublishShell），标题也在其中刷新；
+        // SelectedConversation 则覆盖选中会话被替换（自动总结 / 重命名后重读）的情况。
+        if (string.IsNullOrEmpty(e.PropertyName) ||
+            e.PropertyName == nameof(MainWindowViewModel.SelectedConversation))
+        {
+            Title = _viewModel.WindowTitle;
+        }
+
         if (e.PropertyName == nameof(MainWindowViewModel.SelectedWorkspaceRootPath) && _terminalHostController.IsOpen)
         {
             await _terminalHostController.UpdateWorkspaceRootAsync(_viewModel.SelectedWorkspaceRootPath);

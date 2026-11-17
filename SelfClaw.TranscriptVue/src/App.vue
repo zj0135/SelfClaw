@@ -5,6 +5,7 @@ import AppSidebar from './components/sidebar/AppSidebar.vue';
 import AppToast from './components/common/AppToast.vue';
 import AppConfirmDialog from './components/common/AppConfirmDialog.vue';
 import WindowControls from './components/shell/WindowControls.vue';
+import WindowTitle from './components/shell/WindowTitle.vue';
 import ChatView from './views/ChatView.vue';
 import SettingsView from './views/SettingsView.vue';
 import ImageGenerationView from './views/ImageGenerationView.vue';
@@ -63,7 +64,7 @@ const windowChrome = reactive({
 	isMaximized: false,
 });
 
-const { navItems, sidebarActiveId, onSidebarAction, onSidebarSelect } = useConversationNavigation(currentViewId, chatViewRef);
+const { navItems, sidebarActiveId, activeConversationTitle, onSidebarAction, onSidebarSelect } = useConversationNavigation(currentViewId, chatViewRef);
 
 on('window-state', (payload) => {
 	windowChrome.isMaximized = Boolean(payload.isMaximized);
@@ -147,6 +148,10 @@ onUnmounted(() => {
 		<main class="main">
 			<div class="main-header">
 				<div class="window-drag-region" aria-hidden="true" @pointerdown="onWindowDragPointerDown"></div>
+				<WindowTitle
+					:title="activeConversationTitle"
+					:is-maximized="windowChrome.isMaximized"
+				/>
 				<WindowControls
 					:is-maximized="windowChrome.isMaximized"
 					@action="onWindowControlAction"

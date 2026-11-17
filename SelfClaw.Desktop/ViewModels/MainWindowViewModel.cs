@@ -111,6 +111,17 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
 
     public string SelectedAgentId => _selectedAgentId;
 
+    /// <summary>
+    /// 任务栏 / Alt+Tab 只认窗口标题，网页里的顶栏到不了那一层。没有选中会话时回落到应用名：
+    /// 空标题会被系统显示成 exe 文件名，任务栏需要一个恒定的可识别名字。
+    /// 网页顶栏不同——它在没有会话时留空（见 WindowTitle.vue），两者刻意不一致。
+    /// </summary>
+    public string WindowTitle => _selectedConversation is { Title: var title } && !string.IsNullOrWhiteSpace(title)
+        ? $"{title} - {ApplicationTitle}"
+        : ApplicationTitle;
+
+    private const string ApplicationTitle = "SelfClaw";
+
     public IReadOnlyList<WorkspaceRoot> WorkspaceRoots => _workspaceRoots.ToArray();
 
     public void UpdateCapabilityRevision(long revision)

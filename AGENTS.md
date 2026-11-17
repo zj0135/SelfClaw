@@ -77,6 +77,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 - Direct `ask_user` 提问工具（强制中断语义、AskUserRules 限额、绑定闸门、`questionRequestId` 协议）：`docs/direct-ask-user-design.md`。
 - 桌面/前端：`docs/message-segments-system-design.md`。
 - 侧栏会话分组（项目 / 对话 / 归档：168 小时归档判定、宿主导航时间戳、文件夹 id 前缀与陈旧 `updated_at` 陷阱）：`docs/sidebar-archive-design.md`。
+- 窗口顶栏 / 任务栏标题（顶栏「有会话才出现」与任务栏「恒有名字」的两套空态、标题只能取自导航列表、`pointer-events` 与最大化 4px 补偿）：`docs/window-title-design.md`。
 - 右侧功能面板（聊天视图 SideDock：终端 / 子代理看板的承载、开合与宿主终端状态映射、新增工具 tab 的方式）：`docs/side-dock-design.md`。
 - 右侧面板「审查」工具（工作区 Git diff：`git-diff/*` 协议与「非仓库不是错误」的回包规则、workspace 子树作用域、未跟踪文件合成、限额与空态）：`docs/git-review-pane-design.md`。
 - 生图工作台（OpenAI Images 协议：按模型能力协商 size/quality/style/n、6 分钟长请求的超时与 `jobId` 取消、产物走 `generated-images.selfclaw.local` 虚拟主机与 7 天保留、与聊天模型列表的隔离）：`docs/image-generation-design.md`。

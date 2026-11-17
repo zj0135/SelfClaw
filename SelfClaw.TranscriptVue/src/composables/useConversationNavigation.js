@@ -113,6 +113,15 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 		return standaloneViewIds.has(viewId) ? viewId : selectedConversationId.value;
 	});
 
+	// 顶栏标题：只在「正在看某条会话」时有内容。独立视图不承载会话，新对话（选择为 null）
+	// 还没有标题，两者都留空——顶栏因此不会出现空壳或上一个会话的残留标题。
+	// 标题与侧栏同源（宿主推送的导航列表），自动总结 / 重命名后一起更新。
+	const activeConversationTitle = computed(() => {
+		if (standaloneViewIds.has(currentViewId.value) || selectedConversationId.value === null) return '';
+		const conversation = sidebarConversations.value.find((item) => item.id === selectedConversationId.value);
+		return conversation?.title || '';
+	});
+
 	async function onSidebarAction(action) {
 		try {
 			const actionId = typeof action === 'string' ? action : action?.id;
@@ -200,5 +209,5 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 			if (!isSuperseded(failure)) showToast(failure?.message || String(failure));
 		}
 	}
-	return { navItems, sidebarActiveId, onSidebarAction, onSidebarSelect };
+	return { navItems, sidebarActiveId, activeConversationTitle, onSidebarAction, onSidebarSelect };
 }
