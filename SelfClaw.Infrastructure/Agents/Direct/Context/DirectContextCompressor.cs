@@ -139,8 +139,9 @@ internal sealed class DirectContextCompressor
 
     /// <summary>
     /// The summarizer needs the meaning of an image, not its pixels: sending the bytes would blow its own
-    /// window and leak binary content into a summary. The planner already declines image-bearing units, so
-    /// this is the second line of defence, and it reaches the images nested inside a native tool result.
+    /// window, and the compaction model need not accept images at all. An image-bearing unit is planned like
+    /// any other, so this is the only thing keeping binary content out of the summary request, and it reaches
+    /// the images nested inside a native tool result.
     /// </summary>
     private static IEnumerable<ChatMessage> PlaceholderizeAttachments(IReadOnlyList<ChatMessage> messages)
     {

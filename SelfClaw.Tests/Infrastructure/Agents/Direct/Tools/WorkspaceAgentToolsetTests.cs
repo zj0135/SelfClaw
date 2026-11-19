@@ -378,7 +378,9 @@ public sealed class WorkspaceAgentToolsetTests
 
         rejected.Status.Should().Be(SelfClaw.Core.Runtime.Agent.ToolCallStatus.Failed);
         rejected.Summary.Should().Contain($"the limit is {WorkspaceImageLimits.MaximumImagesPerTurn}");
-        rejected.Summary.Should().Contain("The images already read stay available");
+        rejected.Summary.Should().Contain("Work from what the images already read established");
+        rejected.Summary.Should().NotContain("stay available",
+            "an in-turn compaction may have summarized the round trip that read them");
         rejected.ModelContents.Should().BeNull();
     }
 

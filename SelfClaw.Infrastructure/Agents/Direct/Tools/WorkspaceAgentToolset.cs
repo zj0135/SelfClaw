@@ -278,8 +278,10 @@ internal sealed class WorkspaceAgentToolset
             return result;
         }
 
+        // No promise that the earlier images are still in the context: an in-turn compaction may have
+        // summarized the round trip that read them.
         private WorkspaceFileReadResult BudgetExhausted(int maximum)
             => new(Error: $"This turn already read {_imageCount} image(s) / {_imageBytes} bytes; the limit is {maximum}. "
-                + "The images already read stay available — reuse them or start a new turn.");
+                + "Work from what the images already read established, or start a new turn.");
     }
 }

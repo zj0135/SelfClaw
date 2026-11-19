@@ -10,7 +10,7 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Context;
 /// <summary>
 /// A5: user attachments must reach the provider as content, not only as transcript rows. The image goes
 /// first and the text last, a message carrying only images still produces a unit, and an image-bearing unit
-/// is never planned into a summary.
+/// is planned into a summary like any other unit.
 /// </summary>
 public sealed class DirectPromptComposerAttachmentTests
 {
@@ -33,7 +33,6 @@ public sealed class DirectPromptComposerAttachmentTests
         image.Name.Should().Be("photo.png");
         image.Data.ToArray().Should().Equal(PngBytes);
         message.Contents[1].Should().BeOfType<TextContent>().Which.Text.Should().Be("what is in this picture?");
-        unit.ContainsAttachments.Should().BeTrue("the planner must never fold this unit into a summary");
     }
 
     [Fact]
@@ -67,65 +66,59 @@ public sealed class DirectPromptComposerAttachmentTests
 
         var message = units.Should().ContainSingle().Which.Messages.Should().ContainSingle().Subject;
         message.Contents.Should().ContainSingle().Which.Should().BeOfType<TextContent>();
-        units[0].ContainsAttachments.Should().BeFalse();
     }
 
-    [Fact]
-    public void PlanCompression_stops_before_the_first_image_bearing_unit()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void PlanCompression_plans_an_image_bearing_unit_like_any_other(int imageIndex)
     {
         var (messages, turns) = CreateHistory(
             (MessageRole.User, "first"),
             (MessageRole.User, "second"),
             (MessageRole.User, "third"),
             (MessageRole.User, "fourth"));
-        var units = UnitsWithImageOn(messages, turns, imageIndex: 2);
-
-        var plan = DirectCompactionPlanner.PlanCompression(units, null,
-            new DirectCompressionPolicy(), Window(400), countedTokens: 300);
-
-        // Without the image this history compresses three of four units; the image caps the candidates at
-        // the two units before it, and retention keeps the newer of those two.
-        plan.ShouldCompress.Should().BeTrue();
-        plan.PrefixUnits.Select(unit => unit.SourceSequence).Should().Equal(messages[0].Sequence);
-        plan.ThroughSequence.Should().Be(messages[0].Sequence, "the boundary is the last compressed unit");
-        plan.SourceTokens.Should().Be(100);
-    }
-
-    [Fact]
-    public void PlanCompression_declines_when_the_first_candidate_carries_the_image()
-    {
-        var (messages, turns) = CreateHistory(
-            (MessageRole.User, "first"),
-            (MessageRole.User, "second"),
-            (MessageRole.User, "third"),
-            (MessageRole.User, "fourth"));
-        var units = UnitsWithImageOn(messages, turns, imageIndex: 0);
-
-        var plan = DirectCompactionPlanner.PlanCompression(units, null,
-            new DirectCompressionPolicy(), Window(400), countedTokens: 300);
-
-        // Nothing precedes the image, so there is no contiguous prefix to summarize.
-        plan.ShouldCompress.Should().BeFalse();
-        plan.PrefixUnits.Should().BeEmpty();
-        plan.ThroughSequence.Should().Be(0, "a decline replaces no unit");
-    }
-
-    [Fact]
-    public void PlanCompression_still_compresses_a_history_without_images()
-    {
-        var (messages, turns) = CreateHistory(
-            (MessageRole.User, "first"),
-            (MessageRole.User, "second"),
-            (MessageRole.User, "third"),
-            (MessageRole.User, "fourth"));
-        var units = DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments())
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments(),
+                AttachmentContents(messages[imageIndex].Id))
             .Select(unit => unit with { Tokens = 100 })
             .ToArray();
 
         var plan = DirectCompactionPlanner.PlanCompression(units, null,
             new DirectCompressionPolicy(), Window(400), countedTokens: 300);
 
+        // threshold = 300, keepTarget = 150: only the newest unit is retained, and the prefix is the same three
+        // units wherever the image sits. An image is not a barrier, so the boundary may cross its unit.
         plan.ShouldCompress.Should().BeTrue();
+        plan.PrefixUnits.Select(unit => unit.SourceSequence)
+            .Should().Equal(messages.Take(3).Select(message => message.Sequence));
+        plan.ThroughSequence.Should().Be(messages[2].Sequence, "the boundary is the last compressed unit");
+        plan.SourceTokens.Should().Be(300);
+    }
+
+    [Fact]
+    public void SelectReplayedMessages_skips_what_the_summary_covers_and_what_never_replays()
+    {
+        var conversationId = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var succeeded = Turn(conversationId, ConversationTurnStatus.Succeeded, now);
+        var blocked = Turn(conversationId, ConversationTurnStatus.Blocked, now);
+        var covered = Message(conversationId, succeeded.Id, 1, MessageStatus.Sealed, now);
+        var replayed = Message(conversationId, succeeded.Id, 2, MessageStatus.Sealed, now);
+        var refused = Message(conversationId, blocked.Id, 3, MessageStatus.Sealed, now);
+        var unsettled = Message(conversationId, succeeded.Id, 4, MessageStatus.Streaming, now);
+        var orphaned = Message(conversationId, Guid.NewGuid(), 5, MessageStatus.Sealed, now);
+        var boundary = new ConversationCompactionRecord(Guid.NewGuid(), conversationId, succeeded.Id, 1,
+            "earlier decisions", "test-model", 1, 10, 5, now);
+
+        var selected = DirectHistoryReplay.SelectReplayedMessages(
+            [covered, replayed, refused, unsettled, orphaned], [succeeded, blocked], boundary);
+
+        // Attachment bytes are read for exactly this selection, so it has to match what a request can carry:
+        // nothing at or before the boundary, nothing from a blocked turn, no unsettled fragment.
+        selected.Should().Equal(replayed);
+        DirectHistoryReplay.SelectReplayedMessages([covered, replayed], [succeeded, blocked], null)
+            .Should().Equal(covered, replayed);
     }
 
     private static IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>> AttachmentContents(Guid messageId)
@@ -134,16 +127,16 @@ public sealed class DirectPromptComposerAttachmentTests
             [messageId] = [new DataContent(PngBytes, "image/png") { Name = "photo.png" }]
         };
 
-    private static DirectPromptHistoryUnit[] UnitsWithImageOn(IReadOnlyList<MessageRecord> messages,
-        IReadOnlyList<ConversationTurnRecord> turns, int imageIndex)
-        => DirectHistoryReplay.BuildUnits(messages, turns, [], NoAdjustments(),
-                AttachmentContents(messages[imageIndex].Id))
-            .Select(unit => unit with { Tokens = 100 })
-            .ToArray();
-
     private static IReadOnlyDictionary<Guid, string> NoAdjustments() => new Dictionary<Guid, string>();
 
     private static DirectPromptBudget Window(int? contextWindowTokens) => new(contextWindowTokens, 0);
+
+    private static ConversationTurnRecord Turn(Guid conversationId, ConversationTurnStatus status, DateTimeOffset now)
+        => new(Guid.NewGuid(), conversationId, AgentExecutionMode.Direct, DirectTurnOrigin.Interactive, status, now, now);
+
+    private static MessageRecord Message(Guid conversationId, Guid turnId, long sequence, MessageStatus status,
+        DateTimeOffset now)
+        => new(Guid.NewGuid(), conversationId, turnId, sequence, MessageRole.User, $"message {sequence}", status, now, now);
 
     private static (List<MessageRecord> Messages, List<ConversationTurnRecord> Turns) CreateHistory(
         params (MessageRole Role, string Text)[] entries)
@@ -154,10 +147,9 @@ public sealed class DirectPromptComposerAttachmentTests
         var turns = new List<ConversationTurnRecord>();
         foreach (var (role, text) in entries)
         {
-            var turnId = Guid.NewGuid();
-            turns.Add(new ConversationTurnRecord(turnId, conversationId, AgentExecutionMode.Direct,
-                DirectTurnOrigin.Interactive, ConversationTurnStatus.Succeeded, now, now));
-            messages.Add(new MessageRecord(Guid.NewGuid(), conversationId, turnId, messages.Count + 1, role, text,
+            var turn = Turn(conversationId, ConversationTurnStatus.Succeeded, now);
+            turns.Add(turn);
+            messages.Add(new MessageRecord(Guid.NewGuid(), conversationId, turn.Id, messages.Count + 1, role, text,
                 MessageStatus.Sealed, now, now));
         }
 

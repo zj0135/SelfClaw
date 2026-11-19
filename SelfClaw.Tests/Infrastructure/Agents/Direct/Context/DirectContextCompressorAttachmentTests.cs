@@ -13,8 +13,9 @@ using SelfClaw.Tests.TestDoubles;
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Context;
 
 /// <summary>
-/// A5: the summarizer needs the meaning of an image, never the pixels. The planner already declines
-/// image-bearing units; this covers the second line of defence inside the compressor.
+/// A5: the summarizer needs the meaning of an image, never the pixels. An image-bearing unit is summarized
+/// like any other, so the compressor is the only thing that keeps binary content out of the summary request,
+/// in every shape an image can take inside a unit.
 /// </summary>
 public sealed class DirectContextCompressorAttachmentTests
 {
@@ -84,6 +85,41 @@ public sealed class DirectContextCompressorAttachmentTests
             _ => content.GetType().Name
         }).Should().Equal("Read image 'shot.png' (image/png, 70 bytes).", "[image: shot.png]");
         sent.Should().Contain(textOnlyResult, "a message without binary content is replayed as the same instance");
+        outcome.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task Images_delivered_in_a_follow_up_user_message_are_placeholderized_too()
+    {
+        // The Chat Completions shape: the tool message stays text and the batch's images travel in the user
+        // message that follows it inside the same unit.
+        var client = new RecordingChatClient();
+        var units = new[]
+        {
+            new DirectPromptHistoryUnit(
+                [
+                    new ChatMessage(ChatRole.Assistant, [new FunctionCallContent("call-1", "read_file")]),
+                    new ChatMessage(ChatRole.Tool,
+                        [new FunctionResultContent("call-1", "Read image 'shot.png' (image/png, 70 bytes).")]),
+                    new ChatMessage(ChatRole.User,
+                        [
+                            new TextContent("The following images belong to the tool results above."),
+                            new DataContent(PngBytes, "image/png") { Name = "shot.png" },
+                            new DataContent(PngBytes, "image/png")
+                        ])
+                ], 1)
+        };
+
+        var outcome = await CreateCompressor(client).TryCompressAsync(new DirectCompressionRequest(
+            units, null, 1200, null, CreateLease(client, "turn-model"), Guid.NewGuid(), Guid.NewGuid()));
+
+        var sent = client.Requests.Single();
+        sent.SelectMany(message => message.Contents).OfType<DataContent>().Should().BeEmpty();
+        sent.Select(message => message.Role)
+            .Should().Equal([ChatRole.System, ChatRole.Assistant, ChatRole.Tool, ChatRole.User],
+                "the call, its result and the follow-up keep their order and roles");
+        sent[^1].Contents.OfType<TextContent>().Select(text => text.Text).Should().Equal(
+            "The following images belong to the tool results above.", "[image: shot.png]", "[image: image/png]");
         outcome.Should().NotBeNull();
     }
 

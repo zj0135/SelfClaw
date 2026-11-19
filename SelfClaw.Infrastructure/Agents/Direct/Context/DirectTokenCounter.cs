@@ -35,9 +35,13 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
 
     /// <summary>
     /// A constant stand-in for one image. The tokenizer cannot size binary content, and leaving it at zero
-    /// would let an image-heavy prompt look small enough to skip compaction and the window check.
+    /// would let an image-heavy prompt look small enough to skip compaction and the window check. The value
+    /// sits just above what a standard-resolution image costs at most (Anthropic caps one at 1,568 visual
+    /// tokens), because an image counted low delays compaction while one counted high only starts it a
+    /// little early. A high-resolution image can still cost several times this, which no local count can
+    /// see: only a provider measurement closes that gap.
     /// </summary>
-    internal const int PerImageTokens = 1024;
+    internal const int PerImageTokens = 1600;
 
     internal const string DefaultEncodingName = "o200k_base";
 

@@ -93,8 +93,7 @@ internal sealed class DirectConversationContext
     /// </summary>
     public IReadOnlyList<DirectPromptHistoryUnit> BuildUnits()
         => _entries.Where(entry => !entry.IsProtected)
-            .Select(entry => new DirectPromptHistoryUnit(entry.Messages, entry.SourceSequence,
-                ContainsAttachments: entry.Messages.Any(ContainsAttachment)))
+            .Select(entry => new DirectPromptHistoryUnit(entry.Messages, entry.SourceSequence))
             .ToArray();
 
     /// <summary>
@@ -286,23 +285,4 @@ internal sealed class DirectConversationContext
 
         return new ChatMessage(ChatRole.User, contents);
     }
-
-    // A tool result on the native delivery path nests its image inside the result, so a shallow check would
-    // report a unit full of images as text and let the planner summarize it away.
-    private static bool ContainsAttachment(ChatMessage message)
-        => message.Contents.Any(ContainsAttachment);
-
-    private static bool ContainsAttachment(AIContent content) => content switch
-    {
-        DataContent => true,
-        FunctionResultContent result => ResultContainsAttachment(result.Result),
-        _ => false
-    };
-
-    private static bool ResultContainsAttachment(object? value) => value switch
-    {
-        AIContent content => ContainsAttachment(content),
-        IEnumerable<AIContent> contents => contents.Any(ContainsAttachment),
-        _ => false
-    };
 }

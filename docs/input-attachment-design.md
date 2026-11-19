@@ -1,6 +1,6 @@
 # 输入框图片附件设计
 
-状态：已实施（A1–A6 完成并经独立审核）· 设计冻结（决策 A–G）· 更新：2026-10-18 · schema 仍为 v32（零 DDL）
+状态：已实施（A1–A6 完成并经独立审核）· 设计冻结（决策 A–G）· 更新：2026-11-18（决策 E 修订：含图 unit 参与压缩）· schema 仍为 v32（零 DDL）
 关系：扩展 [Direct 消息队列与 Steer 设计](direct-message-input-design.md) 的准入、载荷与回合语义；转录渲染沿用 [消息段设计](message-segments-system-design.md) 的既有图片段；压缩相关见 [回合开始压缩](direct-context-compaction-design.md) 与 [回合内压缩](direct-in-turn-compaction-design.md)；子代理不继承父附件见 [Subagent 设计](direct-subagent-system-design.md)。
 
 本文同时取代附件尚未接入时「输入入口一律拒绝」的历史表述：`attachments-unsupported` 只作为老库历史 reason 保留，不再有新的产生点。
@@ -13,7 +13,7 @@
 | 输入入口 | `SubmitAsync` 对任何附件返回 `AttachmentsUnsupported` | 校验后接受：仅图片、仅 Direct、单文件 10 MiB、每条 6 张、模型必须声明多模态 |
 | 队列载荷 | `payload_json` 只有文本字段 | `payload_json`（Version 1）增可选附件引用数组，`Version` 不变 |
 | 回合写入 | `ConversationTurnStart.Attachments` 无生产者 | 引用在 claim / steer 消费时还原成记录并写入 `message_attachments` |
-| 模型调用 | composer 只取 `MarkdownContent`，图片不可达 | `DataContent` + `TextContent` 进入同一用户 unit；计数按常数；压缩避开含图 unit |
+| 模型调用 | composer 只取 `MarkdownContent`，图片不可达 | `DataContent` + `TextContent` 进入同一用户 unit；计数按常数；含图 unit 与普通 unit 同等参与压缩，摘要请求里图片换成文本占位 |
 | 清理 | 无任何附件回收路径 | 会话删除回收整目录；取消/丢弃即时删单文件；启动时清「会话不存在且 24 小时未动」的目录 |
 | 前端 | 无添加入口 | 选择器、粘贴、拖拽、待发送 chip、能力闸门与队列数量徽标 |
 
@@ -25,14 +25,14 @@
 | B | 上限 | 单文件 ≤ 10 MiB；每条输入 ≤ 6 张；白名单 `image/png`、`image/jpeg`、`image/webp`、`image/gif` |
 | C | 落盘布局 | `{AppData}/attachments/{conversationId}/{attachmentId}{ext}` |
 | D | schema | 不变，仍是 v32；附件引用走 `conversation_inputs.payload_json` 的可选字段 |
-| E | 含图与压缩 | 含图 unit 不参与压缩规划；图片 token 计一个常数 |
+| E | 含图与压缩 | 含图 unit 与普通 unit 同等参与压缩规划，摘要请求里图片换成 `[image: name]` 文本占位；图片 token 计一个常数（2026-11-18 修订，理由见 §2 第 2 条） |
 | F | 能力闸门 | `IsModelAvailableAsync(modelId) && Configuration.IsMultimodal == true`（可用性与多模态必须同时成立）；前端按 `EnabledModelView.IsMultimodal` 禁用图片入口，宿主在准入时兜底拒绝 |
 | G | 清理 | 会话删除回收整目录；待发送附件在取消/丢弃时删除；启动时清理「会话已不存在」的残留目录 |
 
 ## 2. 三条容易记错的最终事实
 
 1. **首版仍然要求「图片必须伴随文字」。** 宿主 `ValidateAccept` 仍拒绝空 prompt，前端 `canSend` 也沿用 `hasText` 门槛；「空文本 + 附件」只在 composer 内部作为防御分支保留（steer / 续写路径可能命中），不是可用入口。放宽它需要单独评估队列与 `send-prompt` 的空文本语义，本批不做。
-2. **决策 E 的最终形态是「压缩候选集截断到最早含图 unit 之前」**，不是「整盘放弃压缩」。整盘放弃会让「历史里出现过一张图」的会话永久失去回合开始压缩，最终由 `EnsurePromptFitsWindow` 抛错收场；跳过含图 unit 只压缩其它 unit 又会破坏「摘要覆盖连续前缀 + `ThroughSequence` 回放过滤」的不变量。截断候选集同时保住两者；截断后为空才 `Decline`。
+2. **含图 unit 不是压缩屏障（决策 E）。** 含图消息滑出保留尾部后随前缀一起被摘要：摘要请求里图片是 `[image: name]` 占位，摘要完成后这些图片不再进入请求，模型看到的是摘要里的文字；转录里的图片不受影响。不要再把含图 unit 排除在规划之外，两种排除方式都走不通：「跳过含图 unit、只压其它 unit」让前缀有洞，破坏「摘要覆盖连续前缀 + `ThroughSequence` 回放过滤」的不变量；「把候选集截断到最早含图 unit 之前」让那张图之后的历史永远不可压——图越靠前可压的范围越小，第一条消息带图时回合开始与回合内都永不压缩，会话在阈值到窗口之间静默增长，最终由窗口校验抛错收场。
 3. **启动清理是「目录级 + 24 小时年龄护栏」**，不是「24h 孤儿文件扫描」。新对话的附件目录在会话行创建之前就已存在，而 `ListConversationsAsync` 只返回 `Interactive` 会话；没有年龄护栏就会误删刚加到输入框的图片。运行期也不做按引用集合的逐文件扫描。
 
 ## 3. 存储与生命周期
@@ -107,11 +107,11 @@
 
 ## 7. 模型调用
 
-- `AttachmentContentReader` 只为带 `MessageAttachmentKind.Image` 附件的用户消息预读字节；路径经 `TryResolveStoredFile`、媒体类型白名单与体积校验；文件缺失 / 越界 / 超限 / IO 失败 → 跳过该附件并 warning，`OperationCanceledException` 重抛。产物 `DataContent(bytes, mediaType) { Name = fileName }`，随回合上下文存活，不跨回合缓存。
+- `AttachmentContentReader` 只为带 `MessageAttachmentKind.Image` 附件的用户消息预读字节；路径经 `TryResolveStoredFile`、媒体类型白名单与体积校验；文件缺失 / 越界 / 超限 / IO 失败 → 跳过该附件并 warning，`OperationCanceledException` 重抛。产物 `DataContent(bytes, mediaType) { Name = fileName }`，随回合上下文存活，不跨回合缓存。回合开始只把**本次请求还会重放**的消息交给它（`DirectHistoryReplay.SelectReplayedMessages`：可重放、且在现有压缩边界之后）：已被摘要覆盖的含图消息不再重放，也就不再读盘。
 - `DirectHistoryReplay.BuildUnitsCore`：有附件时用户 unit 内容是**先图片后文本**；只有图片没有文字也照常产出 unit（当前入口仍要求文字，这是防御分支）。`DirectConversationContext.AppendInputs` 对 steer 用同一形状，steer 仍是受保护 entry。
-- `DirectTokenCounter`：`DataContent` 计 `PerImageTokens = 1024`；计数缓存键包含图片数量，避免同一 `MessageId` 的纯文本与含图计数互相污染。
-- 压缩：`PlanCompression` 把候选集截断到最早含图 unit 之前（见 §2），后续阈值 / 保留循环 / `prefix` 全部基于截断集合，`Decline` 仍上报未截断候选数；`DirectContextCompressor` 另有防御，把 prefix 里的 `DataContent` 换成 `[image: name]` 占位文本，即使未来放开规划也不会把二进制发给摘要模型。
-- 已知成本：每回合最多 `DirectTurnRun.MaximumProviderRequestsPerTurn`（1024）次 provider 请求会重复发送同一批图片字节；本批不引入跨回合缓存。
+- `DirectTokenCounter`：`DataContent` 计 `PerImageTokens = 1600`（不低于 Claude 标准档单图上限 1,568：低估会推迟压缩，高估只是略早压缩）；计数缓存键包含图片数量，避免同一 `MessageId` 的纯文本与含图计数互相污染。高分辨率档的大图实际可达 4,784，本地计数无法感知，由回合开始触发的 provider 实测下限兜底（`direct-context-compaction-design.md` §5.4）。
+- 压缩：含图 unit 与普通 unit 一样进入 `PlanCompression` 的候选集与前缀，边界可以越过它（见 §2）。`DirectContextCompressor.PlaceholderizeAttachments` 把前缀里的 `DataContent` 换成 `[image: name]` 占位文本，这是摘要请求不含二进制的唯一保证（压缩模型不一定支持图片，原图也会撑爆它自己的窗口）；`CompressionInstruction` 要求摘要保留图片的文件名 / 路径与会话里已得出的结论，并写明图片本身已不在会话中。
+- 已知成本：每回合最多 `DirectTurnRun.MaximumProviderRequestsPerTurn`（1024）次 provider 请求会重复发送同一批图片字节；本批不引入跨回合缓存。图片只经由压缩离开请求：被摘要覆盖之后不再发送。
 
 ## 8. 前端输入框
 
@@ -129,6 +129,7 @@
 - 前端闸门只读 `isMultimodal`；宿主是唯一裁决点，非法附件不会误发。
 - 附件所有权在 `send-prompt` 受理时转移到队列：受理后前端不得再对该 `attachmentId` 发 `attachments/discard`，否则消息里的图片会变成无源引用（转录占位、模型读不到字节）。
 - 首版不支持「只有图片、没有文字」的提交。
+- 含图消息被摘要后图片像素不可恢复：模型此后只有摘要里的文字，要再看需要用户重新发送。保留尾部内的图片原样保留，最新一条消息恒保留，所以用户刚发的图一定先被模型看到。
 - 启动清理只回收「会话不存在且 24 小时未动」的目录，不保证进程被强杀后立刻清空残留。
 
 ## 10. 手工验收清单
@@ -141,3 +142,4 @@
 6. **CLI**：切到 CLI 模式 → 图片入口禁用；若绕过前端提交带附件请求，宿主返回可读拒绝。
 7. **清理**：删除带图会话 → `{AppData}/attachments/{conversationId}` 目录消失（会话删除路径是即时回收）。启动清理带 24 小时年龄护栏：**刚产生的**孤儿目录会被保留，只有「会话不存在且目录内最新写入早于 24 小时」的目录才会在下次启动被清掉 —— 手工验证时请先把目录写入时间改到 25 小时前再重启，不要期待新目录当场消失（这是为了避免误删「新对话尚未提交」的附件而刻意加的）。
 8. **不落库回归**：带图回合的 schema 版本仍为 32，`documents` 无迁移痕迹（`PRAGMA user_version` 不变）。
+9. **压缩**：新会话第一条消息带图，在「上下文压缩」设置里把触发比例调低，聊到状态栏的上下文超过阈值 → 下一回合出现「上下文压缩」分隔项，展开的摘要按文件名提到该图并说明图片已不在会话中；转录里那张图照常显示。带图开场的长工具循环同理：活动文案出现「正在压缩上下文」，回合继续而不是超窗失败。

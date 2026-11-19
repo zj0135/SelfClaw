@@ -11,7 +11,8 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Context;
 
 /// <summary>
 /// A5: a consumed steer that carries images replays exactly like a replayed history message — attachments
-/// first, text last — and stays protected for the rest of the turn.
+/// first, text last — and stays protected for the rest of the turn. A round trip that read an image is an
+/// ordinary unit: in-turn compaction covers it whole.
 /// </summary>
 public sealed class DirectConversationContextAttachmentTests
 {
@@ -59,8 +60,10 @@ public sealed class DirectConversationContextAttachmentTests
     }
 
     [Fact]
-    public void A_tool_result_that_nests_an_image_makes_its_unit_image_bearing_and_stops_compaction()
+    public void A_round_trip_that_read_an_image_is_compacted_with_its_call_result_and_follow_up()
     {
+        // Both delivery shapes in one unit: a native tool result nesting its image, and a follow-up user
+        // message carrying one.
         var context = new DirectConversationContext(null, [], []);
         context.AppendResponse(
             new ChatResponse(new ChatMessage(ChatRole.Assistant,
@@ -74,21 +77,32 @@ public sealed class DirectConversationContextAttachmentTests
                         new DataContent(PngBytes, "image/png") { Name = "shot.png" }
                     })
             ],
-            [new ChatMessage(ChatRole.User, [new TextContent("the images follow")])]);
+            [
+                new ChatMessage(ChatRole.User,
+                    [new TextContent("the images follow"), new DataContent(PngBytes, "image/png") { Name = "shot.png" }])
+            ]);
         context.AppendResponse(new ChatResponse(new ChatMessage(ChatRole.Assistant, "answer")));
 
         var units = context.BuildUnits();
-        units.Select(unit => unit.ContainsAttachments).Should().Equal(true, false);
         units[0].Messages.Select(message => message.Role)
             .Should().Equal([ChatRole.Assistant, ChatRole.Tool, ChatRole.User],
                 "the follow-up belongs to the same unit, so no boundary can separate it from the tool result");
 
+        // threshold = 300, keepTarget = 150: the newest unit is retained and the image-bearing one is the prefix.
         var counted = units.Select(unit => unit with { Tokens = 100 }).ToArray();
         var plan = DirectCompactionPlanner.PlanCompression(counted, null, new DirectCompressionPolicy(),
             new DirectPromptBudget(400, null), countedTokens: 300);
 
-        plan.ShouldCompress.Should().BeFalse("the image bearing unit is the first candidate, so no prefix is left");
-        plan.PrefixUnits.Should().BeEmpty();
+        plan.ShouldCompress.Should().BeTrue("an image is no barrier, in either delivery shape");
+        plan.PrefixUnits.Should().Equal(counted[0]);
+
+        context.ApplyInTurnCompaction("summarized", plan.PrefixUnits.Count);
+
+        var remaining = context.Messages.SelectMany(message => message.Contents).ToArray();
+        remaining.OfType<DataContent>().Should().BeEmpty("the follow-up image leaves with its unit");
+        remaining.OfType<FunctionCallContent>().Should().BeEmpty();
+        remaining.OfType<FunctionResultContent>().Should().BeEmpty("the nested image leaves with its tool result");
+        context.Messages.Should().Contain(message => message.Text == "answer");
     }
 
     private static IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>> AttachmentContents(Guid messageId)

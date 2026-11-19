@@ -91,6 +91,8 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 
 计数成本：`CountTokens` 增量维护（只计新增消息）；`CountTools` 有 schema 指纹缓存。每次迭代的检查成本可忽略（C11 同）。
 
+回合内检查点不接 provider 实测下限（只有回合开始接，见 `direct-context-compaction-design.md` §5.4）：上一次请求的输入不含其后追加的响应与工具结果，压缩之后它描述的更是一个已不存在的 prompt。
+
 ### 3.3 规划（复用 `PlanCompression`）
 
 把内存单元（§4）包装为 `DirectPromptHistoryUnit`（`SourceSequence = 0`、`Tokens` = 建单元时已计数），`existing = null` 调用 `PlanCompression`：
@@ -126,6 +128,8 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 | --- | --- |
 | 回合开始的重放历史 | composer 的 `DirectPromptHistoryUnit`（一条存储消息；工具调用与结果同单元） |
 | 回合内工具往返 | 一次 provider 响应的全部消息 + 紧随其后的工具结果消息（**调用与结果永不分离**） |
+
+含图单元不是例外：带图的开场消息、读到图片的工具往返（承载图片的 follow-up user 消息与其 tool 结果同单元）都可以进入前缀，摘要请求里图片换成文本占位。若把它们排除在外，带图开场的回合里所有往返都排在图之后，回合内压缩会全部失效直到超窗。
 
 ### 4.2 受保护（永不进入前缀、永不移除）
 

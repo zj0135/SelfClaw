@@ -28,34 +28,35 @@ internal static class DirectCompactionPlanner
     /// Plans compaction from already counted units. Every decline returns a plan with no prefix and the
     /// threshold that was decided against, so the caller can still report what it measured.
     /// </summary>
+    /// <param name="observedTokens">
+    /// The provider's own measurement of this context, when the caller holds one that describes the prompt
+    /// being planned. It can only raise the trigger: the local tokenizer approximates a provider's and sizes
+    /// an image by a constant, so a measurement at the threshold starts compaction even while the local count
+    /// is still below it. Which units the summary replaces is decided by the unit counts alone.
+    /// </param>
     internal static DirectCompressionPlan PlanCompression(
         IReadOnlyList<DirectPromptHistoryUnit> units,
         ConversationCompactionRecord? existing,
         DirectCompressionPolicy policy,
         DirectPromptBudget budget,
-        int? countedTokens)
+        int? countedTokens,
+        int? observedTokens = null)
     {
         ArgumentNullException.ThrowIfNull(units);
         ArgumentNullException.ThrowIfNull(policy);
         var existingBoundary = existing?.ThroughSequence ?? 0;
+        // Every unit after the boundary is a candidate, an image-bearing one included: the compressor hands
+        // the summarizer a text placeholder for each image, so no unit is a barrier the boundary cannot cross.
+        // Stopping at the first image would leave everything after it uncompactable until the window overflows.
         var candidates = units.Where(unit => unit.SourceSequence > existingBoundary).ToArray();
         var threshold = ResolveThreshold(policy, budget);
-        // Decision E: an image-bearing unit is never summarized. The boundary can only fall on a continuous
-        // prefix, so planning stops before the first such unit: declining the whole plan would cost a
-        // conversation that once held an image all of its turn-start compaction, and skipping the unit would
-        // break the "the summary covers a prefix" invariant the replay filter depends on.
-        var plannable = candidates;
-        var firstImageIndex = Array.FindIndex(candidates, unit => unit.ContainsAttachments);
-        if (firstImageIndex >= 0)
-        {
-            plannable = candidates[..firstImageIndex];
-        }
 
         // The reserve belongs to the trigger side: on a small window a prompt just under the threshold can
         // still overflow once the response is written, and compacting is the only way to make room. Prompt
         // counts stay reserve-free because the context-size readout reports them that way.
         if (!policy.Enabled || countedTokens is not int counted ||
-            counted + ResolveOutputReserve(budget.MaxOutputTokens) < threshold || plannable.Length == 0)
+            Math.Max(counted + ResolveOutputReserve(budget.MaxOutputTokens), observedTokens ?? 0) < threshold ||
+            candidates.Length == 0)
         {
             return Decline(threshold);
         }
@@ -64,10 +65,10 @@ internal static class DirectCompactionPlanner
         // instead of estimating (design §5.5). This is the only null check: retention stops as soon as the
         // target is reached, so the older prefix units are never visited by the retention walk below and
         // have to be validated here with the rest.
-        var unitTokens = new int[plannable.Length];
-        for (var index = 0; index < plannable.Length; index++)
+        var unitTokens = new int[candidates.Length];
+        for (var index = 0; index < candidates.Length; index++)
         {
-            if (plannable[index].Tokens is not int tokens)
+            if (candidates[index].Tokens is not int tokens)
             {
                 return Decline(threshold);
             }
@@ -78,7 +79,7 @@ internal static class DirectCompactionPlanner
         var keepTarget = (int)(threshold * RetainedContextRatio);
         var retainedUnits = 0;
         var retainedTokens = 0;
-        for (var index = plannable.Length - 1; index >= 0; index--)
+        for (var index = candidates.Length - 1; index >= 0; index--)
         {
             // The newest unit is always retained, even when it alone exceeds the retention target.
             if (retainedUnits > 0 && retainedTokens + unitTokens[index] > keepTarget)
@@ -90,13 +91,13 @@ internal static class DirectCompactionPlanner
             retainedTokens += unitTokens[index];
         }
 
-        var prefixLength = plannable.Length - retainedUnits;
+        var prefixLength = candidates.Length - retainedUnits;
         if (prefixLength <= 0)
         {
             return Decline(threshold);
         }
 
-        var prefix = plannable.Take(prefixLength).ToArray();
+        var prefix = candidates.Take(prefixLength).ToArray();
         var sourceTokens = 0;
         for (var index = 0; index < prefixLength; index++)
         {

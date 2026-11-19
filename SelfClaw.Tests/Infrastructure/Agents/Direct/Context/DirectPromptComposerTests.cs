@@ -401,6 +401,61 @@ public sealed class DirectPromptComposerTests
         plan.ThroughSequence.Should().Be(units[2].SourceSequence);
     }
 
+    [Fact]
+    public void PlanCompression_starts_at_a_provider_measurement_the_local_count_has_not_reached()
+    {
+        var units = CountedUnits(100, 100, 100, 100);
+
+        // threshold = 300: the local count (200) would decline, the provider's own measurement would not.
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
+            new DirectCompressionPolicy(), Window(400), countedTokens: 200, observedTokens: 300);
+
+        // The measurement only decides whether to compact. What the summary replaces is still sized by the
+        // unit counts: keepTarget = 150 retains the newest unit alone.
+        plan.ShouldCompress.Should().BeTrue();
+        plan.ThroughSequence.Should().Be(units[2].SourceSequence);
+        plan.SourceTokens.Should().Be(300);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData(299)]
+    public void PlanCompression_declines_when_neither_the_count_nor_the_measurement_reaches_the_threshold(
+        int? observedTokens)
+    {
+        var units = CountedUnits(100, 100, 100, 100);
+
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
+            new DirectCompressionPolicy(), Window(400), countedTokens: 200, observedTokens);
+
+        plan.ShouldCompress.Should().BeFalse();
+    }
+
+    [Fact]
+    public void PlanCompression_never_lets_a_lower_measurement_cancel_the_local_trigger()
+    {
+        var units = CountedUnits(100, 100, 100, 100);
+
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
+            new DirectCompressionPolicy(), Window(400), countedTokens: 300, observedTokens: 10);
+
+        plan.ShouldCompress.Should().BeTrue("the measurement is a floor for the trigger, never a replacement");
+    }
+
+    [Fact]
+    public void PlanCompression_declines_when_a_measurement_triggers_but_every_unit_fits_the_retention_target()
+    {
+        var units = CountedUnits(50, 50);
+
+        // The measurement can run ahead of the local count (content the next request no longer replays). The
+        // prefix is sized locally, so nothing is summarized and no summarization call is ever made.
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
+            new DirectCompressionPolicy(), Window(400), countedTokens: 100, observedTokens: 300);
+
+        plan.ShouldCompress.Should().BeFalse();
+        plan.PrefixUnits.Should().BeEmpty();
+    }
+
     private static IReadOnlyList<DirectPromptHistoryUnit> CountedUnits(params int[] tokensPerUnit)
     {
         var (messages, turns, runs) = CreateHistory(tokensPerUnit

@@ -161,8 +161,11 @@ internal sealed class DirectTurnPreparer
             providerLease.Options.MaxOutputTokens);
         // The units are built once and shared by counting, compaction planning and the prompt itself:
         // rebuilding them per request would rescan the whole stored history on every turn. Images are
-        // read before the units so counting, planning and the request measure the same bytes.
-        var attachmentContents = await _attachmentContentReader.ReadAsync(request.Messages, cancellationToken)
+        // read before the units so counting, planning and the request measure the same content, and only
+        // for the messages this request can still replay.
+        var attachmentContents = await _attachmentContentReader.ReadAsync(
+                DirectHistoryReplay.SelectReplayedMessages(request.Messages, request.Turns, request.Compression),
+                cancellationToken)
             .ConfigureAwait(false);
         // A request without tool executions carries no tool history; normalizing once keeps the units and
         // the plan reading the same list.

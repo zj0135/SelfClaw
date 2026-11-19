@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using SelfClaw.Core.Interfaces;
+using SelfClaw.Core.Models;
 using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct;
@@ -11,6 +12,7 @@ using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.AiProviders.Models;
+using SelfClaw.Tests.TestDoubles;
 using Xunit;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct;
@@ -22,6 +24,13 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct;
 public sealed class DirectCompactionRuntimeTests
 {
     private const string Summary = "summarized history";
+
+    /// <summary>
+    /// The threshold the measurement tests decide against. The deterministic counter sizes the prompt at 123
+    /// (system text 28, units 32 + 32 + 31) and the reserve adds 50, so the local trigger value of 173 stays
+    /// below it while the units alone (95) still exceed the retention target of 90.
+    /// </summary>
+    private const int MeasuredThreshold = 180;
 
     /// <summary>No declared window and a small absolute threshold: the trigger is decided without a budget.</summary>
     private static DirectCompressionPolicy TriggeringPolicy()
@@ -213,6 +222,175 @@ public sealed class DirectCompactionRuntimeTests
         seen.OfType<ContextCompactionFailedEvent>().Should().BeEmpty();
         seen.OfType<RunCompletedEvent>().Should().BeEmpty();
     }
+
+    [Fact]
+    public async Task An_image_on_the_oldest_message_does_not_stop_turn_start_compaction()
+    {
+        var client = new TurnClient([[Finish("m1", ChatFinishReason.Stop, new TextContent("done"))]])
+        {
+            SummaryText = Summary
+        };
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client)
+        {
+            Options = new ChatOptions { MaxOutputTokens = 50 }
+        };
+        var request = CreateRequest(factory);
+        var reader = new ScriptedAttachmentContentReader()
+            .WithImage(MessageOf(request, "prior prompt").Id, "prior.png")
+            .WithImage(MessageOf(request, "user prompt").Id, "current.png");
+        var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory,
+            compressionPolicy: new FixedPolicySource(TriggeringPolicy()), attachmentContentReader: reader);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(request));
+
+        // The oldest candidate carries an image and the boundary still crosses it: only the newest unit is
+        // retained at this threshold, so the image-bearing message and the answer after it are the prefix.
+        var completed = events.OfType<ContextCompactionCompletedEvent>().Should().ContainSingle().Which;
+        completed.Compaction.ThroughSequence.Should().Be(MessageOf(request, "prior answer").Sequence);
+        completed.Compaction.SourceMessageCount.Should().Be(2);
+
+        var summarized = client.SummaryCalls.Should().ContainSingle().Subject;
+        Images(summarized).Should().BeEmpty("the summarizer never receives binary content");
+        summarized.SelectMany(message => message.Contents).OfType<TextContent>()
+            .Should().Contain(text => text.Text == "[image: prior.png]");
+
+        var sent = client.Invocations.Should().ContainSingle().Subject;
+        sent.Should().NotContain(message => message.Text == "prior answer");
+        Images(sent).Should().ContainSingle("only the retained message still carries its image")
+            .Which.Name.Should().Be("current.png");
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status
+            .Should().Be(RunCompletionStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task An_image_the_stored_summary_already_covers_is_not_read_again()
+    {
+        var client = new TurnClient([[Finish("m1", ChatFinishReason.Stop, new TextContent("done"))]]);
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client);
+        var request = CreateRequest(factory);
+        var boundary = MessageOf(request, "prior answer");
+        request = request with
+        {
+            Compression = new ConversationCompactionRecord(Guid.NewGuid(), request.ConversationId, boundary.TurnId,
+                boundary.Sequence, Summary, "test-model", 2, 10, 5, DateTimeOffset.UtcNow)
+        };
+        var userPrompt = MessageOf(request, "user prompt");
+        var reader = new ScriptedAttachmentContentReader()
+            .WithImage(MessageOf(request, "prior prompt").Id, "prior.png")
+            .WithImage(userPrompt.Id, "current.png");
+        var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory, attachmentContentReader: reader);
+
+        await CollectAsync(runtime.StreamTurnAsync(request));
+
+        reader.RequestedMessageIds.Should().Equal([userPrompt.Id],
+            "a message behind the boundary never reaches a provider again, so its bytes are not read either");
+        Images(client.Invocations.Should().ContainSingle().Subject).Should().ContainSingle()
+            .Which.Name.Should().Be("current.png");
+    }
+
+    [Fact]
+    public async Task The_preceding_turns_measurement_starts_a_compaction_the_local_count_would_not()
+    {
+        var client = new TurnClient([[Finish("m1", ChatFinishReason.Stop, new TextContent("done"))]])
+        {
+            SummaryText = Summary
+        };
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client)
+        {
+            Options = new ChatOptions { MaxOutputTokens = 50 }
+        };
+        // The preceding turn's last request measured exactly the threshold; that is the size the transcript shows.
+        var request = WithPrecedingMeasurement(CreateRequest(factory), MeasuredThreshold);
+
+        var events = await CollectAsync(MeasuredRuntime(factory).StreamTurnAsync(request));
+
+        var started = events.OfType<ContextCompactionStartedEvent>().Should().ContainSingle().Which;
+        started.EstimatedTokens.Should().Be(123, "the event keeps reporting the local, reserve-free count");
+        started.ThresholdTokens.Should().Be(MeasuredThreshold);
+        // The measurement only decides whether to compact. The prefix is still sized by the unit counts: the
+        // retention target of 90 keeps the two newest units (31 + 32).
+        events.OfType<ContextCompactionCompletedEvent>().Should().ContainSingle()
+            .Which.Compaction.ThroughSequence.Should().Be(MessageOf(request, "prior prompt").Sequence);
+        var sent = client.Invocations.Should().ContainSingle().Subject;
+        sent.Should().NotContain(message => message.Text == "prior prompt");
+        sent.Should().Contain(message => message.Text == "prior answer");
+    }
+
+    [Fact]
+    public Task A_preceding_turn_that_reported_nothing_leaves_the_local_count_to_decide()
+        => AssertTheLocalCountDecidesAsync(request => request);
+
+    [Fact]
+    public Task A_measurement_older_than_the_preceding_turn_is_never_used()
+        => AssertTheLocalCountDecidesAsync(request =>
+        {
+            // A later turn that reported nothing sits between the measurement and this turn. An older
+            // measurement may predate the stored boundary, so it must never be picked up instead.
+            var current = request.Turns.Single(turn => turn.Id == request.TurnId);
+            var silent = new ConversationTurnRecord(Guid.NewGuid(), request.ConversationId, AgentExecutionMode.Direct,
+                DirectTurnOrigin.Interactive, ConversationTurnStatus.Failed, current.StartedAtUtc.AddSeconds(-30),
+                current.StartedAtUtc);
+            var measured = WithPrecedingMeasurement(request, 10 * MeasuredThreshold);
+            return measured with { Turns = [.. measured.Turns, silent] };
+        });
+
+    [Fact]
+    public Task A_preceding_cli_turn_never_supplies_the_measurement()
+        => AssertTheLocalCountDecidesAsync(request =>
+        {
+            // A CLI turn owns its context: whatever it reports describes the CLI session, not this prompt.
+            var measured = WithPrecedingMeasurement(request, 10 * MeasuredThreshold);
+            return measured with
+            {
+                Turns = measured.Turns
+                    .Select(turn => turn.Id == request.TurnId ? turn : turn with { ExecutionMode = AgentExecutionMode.Cli })
+                    .ToArray()
+            };
+        });
+
+    // The prompt counts 173 with its reserve against a threshold of 180, so nothing but a qualifying
+    // measurement can start a compaction here.
+    private static async Task AssertTheLocalCountDecidesAsync(Func<DirectChatTurnRequest, DirectChatTurnRequest> shape)
+    {
+        var client = new TurnClient([[Finish("m1", ChatFinishReason.Stop, new TextContent("done"))]])
+        {
+            SummaryText = Summary
+        };
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client)
+        {
+            Options = new ChatOptions { MaxOutputTokens = 50 }
+        };
+
+        var events = await CollectAsync(MeasuredRuntime(factory).StreamTurnAsync(shape(CreateRequest(factory))));
+
+        events.OfType<ContextCompactionStartedEvent>().Should().BeEmpty();
+        client.SummaryCalls.Should().BeEmpty();
+        client.Invocations.Should().ContainSingle().Which.Should().Contain(message => message.Text == "prior prompt");
+    }
+
+    private static DirectAgentChatRuntime MeasuredRuntime(DirectAgentChatRuntimeTests.FakeChatClientFactory factory)
+        => DirectAgentChatRuntimeTests.CreateRuntime(
+            factory,
+            new FixedResolver(Lease()),
+            new FixedPolicySource(new DirectCompressionPolicy(Enabled: true, AbsoluteThresholdTokens: MeasuredThreshold)),
+            new DirectInTurnCompactionTests.CountingTokenCounter());
+
+    // Every turn but the running one reports this as the input of its last provider request.
+    private static DirectChatTurnRequest WithPrecedingMeasurement(DirectChatTurnRequest request, int inputTokens)
+        => request with
+        {
+            Turns = request.Turns
+                .Select(turn => turn.Id == request.TurnId
+                    ? turn
+                    : turn with { Usage = new TurnUsage(LastRequestInputTokens: inputTokens) })
+                .ToArray()
+        };
+
+    private static MessageRecord MessageOf(DirectChatTurnRequest request, string text)
+        => request.Messages.Single(message => message.MarkdownContent == text);
+
+    private static DataContent[] Images(IReadOnlyList<ChatMessage> messages)
+        => messages.SelectMany(message => message.Contents).OfType<DataContent>().ToArray();
 
     private static DirectChatTurnRequest CreateRequest(DirectAgentChatRuntimeTests.FakeChatClientFactory factory)
         => (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(factory.Profile.Id);

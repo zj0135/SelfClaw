@@ -72,7 +72,8 @@ internal sealed class DirectCompactionStep
         }
 
         var plan = DirectCompactionPlanner.PlanCompression(
-            counted.Units, input.Request.Compression, input.Policy, input.Budget, counted.PromptTokens);
+            counted.Units, input.Request.Compression, input.Policy, input.Budget, counted.PromptTokens,
+            ObservedContextTokens(input.Request));
         if (!plan.ShouldCompress)
         {
             // No estimate here: the meter keeps the last measured context and updates when this request reports
@@ -151,6 +152,8 @@ internal sealed class DirectCompactionStep
             return;
         }
 
+        // No provider measurement is passed here: the last request's input predates the response and the tool
+        // results appended since, and it describes a prompt that no longer exists once a summary was applied.
         var plan = DirectCompactionPlanner.PlanCompression(units, existing: null, setup.CompressionPolicy, setup.Budget,
             measured.PromptTokens);
         if (!plan.ShouldCompress)
@@ -275,6 +278,21 @@ internal sealed class DirectCompactionStep
             setup.ProviderLease.Options.Tools,
             setup.ProviderLease.Profile,
             DirectCompactionPlanner.ResolveOutputReserve(setup.ProviderLease.Options.MaxOutputTokens));
+
+    // The provider's own measurement of the context this turn starts from: the input of the last request the
+    // preceding turn made, which is also the context size the transcript displays. Only the immediately
+    // preceding turn qualifies. An older measurement can predate the stored boundary and would compact an
+    // already compacted conversation again, so a preceding turn that reported nothing means "no floor",
+    // never "look further back". A CLI turn measures the CLI's own session, not the prompt Direct replays.
+    private static int? ObservedContextTokens(DirectChatTurnRequest request)
+    {
+        var preceding = request.Turns
+            .Where(turn => turn.Id != request.TurnId)
+            .MaxBy(turn => turn.StartedAtUtc);
+        return preceding is { ExecutionMode: AgentExecutionMode.Direct }
+            ? preceding.Usage?.LastRequestInputTokens
+            : null;
+    }
 
     private Task<DirectCompressionResult?> SummarizeAsync(
         Guid conversationId,

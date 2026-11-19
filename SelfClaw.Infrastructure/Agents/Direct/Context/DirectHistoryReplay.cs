@@ -46,6 +46,28 @@ internal static class DirectHistoryReplay
         return new DirectPromptBuild(systemText, replay, trailingProtectedMessages);
     }
 
+    /// <summary>
+    /// The stored messages a request against <paramref name="compression"/> can still carry. Attachment bytes
+    /// are read for exactly these: a message the summary already covers never reaches a provider again, and a
+    /// conversation that once held images would otherwise re-read every one of them on each turn.
+    /// </summary>
+    internal static IReadOnlyList<MessageRecord> SelectReplayedMessages(
+        IReadOnlyList<MessageRecord> messages,
+        IReadOnlyList<ConversationTurnRecord> turns,
+        ConversationCompactionRecord? compression)
+    {
+        ArgumentNullException.ThrowIfNull(messages);
+        ArgumentNullException.ThrowIfNull(turns);
+        var boundary = compression?.ThroughSequence ?? 0;
+        var turnsById = turns.ToDictionary(turn => turn.Id);
+        // A message whose turn is unknown is not selected instead of rejected: BuildUnits validates the same
+        // history next and refuses it as a whole.
+        return messages
+            .Where(message => message.Sequence > boundary &&
+                turnsById.TryGetValue(message.TurnId, out var turn) && IsReplayable(message, turn))
+            .ToArray();
+    }
+
     internal static IReadOnlyList<DirectPromptHistoryUnit> BuildUnits(
         IReadOnlyList<MessageRecord> messages,
         IReadOnlyList<ConversationTurnRecord> turns,
@@ -166,8 +188,7 @@ internal static class DirectHistoryReplay
             contents.Add(new TextContent(markdown));
         }
 
-        return new DirectPromptHistoryUnit([new ChatMessage(ChatRole.User, contents)], message.Sequence,
-            ContainsAttachments: true);
+        return new DirectPromptHistoryUnit([new ChatMessage(ChatRole.User, contents)], message.Sequence);
     }
 
     // Stored reasoning has no provider signature and is transcript-only. Assistant history is

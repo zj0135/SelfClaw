@@ -12,6 +12,7 @@ using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Context;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using SelfClaw.Infrastructure.AiProviders.Models;
+using SelfClaw.Tests.TestDoubles;
 using Xunit;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct;
@@ -375,15 +376,102 @@ public sealed class DirectInTurnCompactionTests
         terminal.ErrorMessage.Should().NotContain("prior prompt", "the error must not leak prompt content");
     }
 
+    [Fact]
+    public async Task An_image_on_the_opening_message_does_not_stop_in_turn_compaction()
+    {
+        // 300-character answers make each round trip cost 340 tokens, and a 700 window at 0.9 puts the threshold
+        // at 630: the second round trip crosses it. The image-bearing opening message is the oldest unit, so
+        // only a summary that covers it brings the prompt back under the window.
+        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 2, answerLength: 300));
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client, contextWindowTokens: 700)
+        {
+            Options = new ChatOptions { MaxOutputTokens = 50 }
+        };
+        var request = CreateRequest(factory.Profile.Id, history: []);
+        var reader = new ScriptedAttachmentContentReader().WithImage(request.Messages[0].Id, "photo.png");
+        var runtime = CreateRuntime(factory,
+            policy: new DirectCompressionPolicy(Enabled: true, ThresholdRatio: 0.9d), reader: reader);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(request));
+
+        events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
+            .Which.CoveredUnitCount.Should().Be(2, "the opening message and the first round trip are the prefix");
+        client.Requests.Should().HaveCount(3);
+        Images(client.Requests[1]).Should().ContainSingle("the image is sent verbatim until a summary covers it");
+        var summarized = client.SummaryCalls.Should().ContainSingle().Subject;
+        Images(summarized).Should().BeEmpty("the summarizer never receives binary content");
+        summarized.SelectMany(message => message.Contents).OfType<TextContent>()
+            .Should().Contain(text => text.Text == "[image: photo.png]");
+        Images(client.Requests[2]).Should().BeEmpty("the image left the context with the unit that carried it");
+        client.Requests[2].Should().NotContain(message => message.Text == "user prompt");
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
+    }
+
+    [Theory]
+    [InlineData(AiProviderApiFormat.AnthropicMessages)]
+    [InlineData(AiProviderApiFormat.OpenAIChatCompletions)]
+    public async Task A_round_trip_that_read_an_image_is_summarized_once_it_leaves_the_retained_tail(
+        AiProviderApiFormat format)
+    {
+        // The first round trip reads an image; the second is large enough to cross the threshold of 600 and to
+        // fill the retained tail on its own. Both delivery shapes are covered: nested in the tool result
+        // (Anthropic) and carried by the follow-up user message (Chat Completions).
+        var client = new ScriptedClient(
+        [
+            [Finish("tool-1", ChatFinishReason.ToolCalls, new TextContent("AA"),
+                new FunctionCallContent("call-1", "view", new Dictionary<string, object?>()))],
+            [Finish("tool-2", ChatFinishReason.ToolCalls, new TextContent(new string('B', 400)),
+                new FunctionCallContent("call-2", "probe", new Dictionary<string, object?>()))],
+            [Finish("final", ChatFinishReason.Stop, new TextContent("done"))]
+        ]);
+        var factory = CreateFactory(client);
+        factory.Profile = factory.Profile with
+        {
+            ApiFormat = format,
+            Configuration = new AiModelConfiguration("test-model", "Test model",
+                new AiSamplingOptions(false, 0.7, false, 0.7), IsMultimodal: true)
+        };
+        var runtime = CreateRuntime(factory, policy: Policy(600), lease: Lease(Probe(), ImageProbe()));
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id, history: [])));
+
+        client.Requests.Should().HaveCount(3);
+        Images(client.Requests[1]).Should().ContainSingle("the image is delivered live after it was read")
+            .Which.Name.Should().Be("shot.png");
+        events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
+            .Which.CoveredUnitCount.Should().Be(2, "the opening message and the image round trip are the prefix");
+        var summarized = client.SummaryCalls.Should().ContainSingle().Subject;
+        Images(summarized).Should().BeEmpty("the summarizer never receives binary content");
+        Flatten(summarized).OfType<TextContent>().Should().Contain(text => text.Text == "[image: shot.png]");
+
+        var compacted = client.Requests[2];
+        Images(compacted).Should().BeEmpty("the image left the context with the round trip that read it");
+        compacted.SelectMany(message => message.Contents).OfType<FunctionCallContent>()
+            .Select(call => call.CallId).Should().Equal("call-2");
+        AssertNoOrphanedCalls(compacted);
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
+    }
+
+    // A native tool result nests its parts, so an image is looked for one level down as well.
+    private static IEnumerable<AIContent> Flatten(IReadOnlyList<ChatMessage> messages)
+        => messages.SelectMany(message => message.Contents).SelectMany(content =>
+            content is FunctionResultContent { Result: IEnumerable<AIContent> nested } ? nested : new[] { content });
+
+    private static DataContent[] Images(IReadOnlyList<ChatMessage> messages)
+        => Flatten(messages).OfType<DataContent>().ToArray();
+
     private static DirectAgentChatRuntime CreateRuntime(
         DirectAgentChatRuntimeTests.FakeChatClientFactory factory,
         DirectCompressionPolicy? policy = null,
-        IDirectTokenCounter? counter = null)
+        IDirectTokenCounter? counter = null,
+        IAttachmentContentReader? reader = null,
+        DirectTurnCapabilityLease? lease = null)
         => DirectAgentChatRuntimeTests.CreateRuntime(
             factory,
-            new FixedResolver(Lease()),
+            new FixedResolver(lease ?? Lease(Probe())),
             new FixedPolicySource(policy ?? Policy(200)),
-            counter ?? new CountingTokenCounter());
+            counter ?? new CountingTokenCounter(),
+            attachmentContentReader: reader);
 
     private static DirectAgentChatRuntimeTests.FakeChatClientFactory CreateFactory(ScriptedClient client)
         => new(client) { Options = new ChatOptions { MaxOutputTokens = 50 } };
@@ -443,9 +531,32 @@ public sealed class DirectInTurnCompactionTests
                 : null);
     }
 
-    private static DirectTurnCapabilityLease Lease()
-        => new([], [new DirectToolBinding(Probe(), new DirectToolDescriptor(ToolCallKind.Other))],
+    private static DirectTurnCapabilityLease Lease(params AIFunction[] tools)
+        => new([], tools.Select(tool => new DirectToolBinding(tool, new DirectToolDescriptor(ToolCallKind.Other))).ToArray(),
             new Dictionary<Guid, string>(), []);
+
+    /// <summary>
+    /// Answers like <c>read_file</c> does for an image: a text header plus the image as model content. The loop
+    /// decides how the protocol carries it, so one tool serves both delivery shapes.
+    /// </summary>
+    private static AIFunction ImageProbe()
+        => AIFunctionFactory.Create(
+            () => new DirectToolResult(ToolCallStatus.Completed, "Read shot.png.",
+                JsonSerializer.SerializeToElement("shot.png"), "Read shot.png.",
+                [
+                    new TextContent("Read image 'shot.png'."),
+                    new DataContent(new byte[] { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x2A }, "image/png")
+                    {
+                        Name = "shot.png"
+                    }
+                ]),
+            new AIFunctionFactoryOptions
+            {
+                Name = "view",
+                Description = "Synthetic image tool.",
+                ExcludeResultSchema = true,
+                MarshalResult = (value, _, _) => ValueTask.FromResult(value)
+            });
 
     /// <summary>
     /// Returns a fresh result per invocation: a tool that answers identically every time is exactly what the
@@ -567,9 +678,10 @@ public sealed class DirectInTurnCompactionTests
 
     /// <summary>
     /// Deterministic token arithmetic: every message costs <see cref="MessageCost"/> plus the length of its text
-    /// content. Compaction boundaries therefore depend only on the texts a test chose.
+    /// content. Compaction boundaries therefore depend only on the texts a test chose. The turn-start tests
+    /// share it for the same reason.
     /// </summary>
-    private sealed class CountingTokenCounter : IDirectTokenCounter
+    internal sealed class CountingTokenCounter : IDirectTokenCounter
     {
         internal const int MessageCost = 20;
 
