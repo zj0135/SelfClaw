@@ -6,9 +6,9 @@ namespace SelfClaw.Infrastructure.AiProviders.OpenAi;
 /// <summary>
 /// Line-buffered SSE transform for the OpenAI-compatible stream quirks the OpenAI SDK and
 /// Microsoft.Extensions.AI reject or ignore. It guarantees every object inside a streamed
-/// <c>tool_calls</c> array carries <c>"type":"function"</c>, and aliases the reasoning field
-/// names M.E.AI does not read onto <c>reasoning_content</c>. Only <c>data:</c> frames are
-/// inspected; every other byte is forwarded unchanged. See
+/// <c>tool_calls</c> array carries <c>"type":"function"</c>, aliases the reasoning field
+/// names M.E.AI does not read onto <c>reasoning_content</c>, and drops an empty <c>refusal</c>
+/// field. Only <c>data:</c> frames are inspected; every other byte is forwarded unchanged. See
 /// <see cref="OpenAiStreamNormalizingPolicy"/> for why this is needed.
 /// </summary>
 internal sealed class OpenAiStreamNormalizingStream : Stream
@@ -24,6 +24,7 @@ internal sealed class OpenAiStreamNormalizingStream : Stream
     private const string ReasoningName = "reasoning";
     private const string ReasoningTextName = "reasoning_text";
     private const string ReasoningDetailsName = "reasoning_details";
+    private const string RefusalName = "refusal";
     private readonly Stream _inner;
     private readonly byte[] _readBuffer = new byte[8192];
     private byte[] _pending = new byte[8192];
@@ -154,7 +155,8 @@ internal sealed class OpenAiStreamNormalizingStream : Stream
     {
         if (!line.StartsWith(DataPrefix, StringComparison.Ordinal) ||
             !(line.Contains(ToolCallsName, StringComparison.Ordinal) ||
-              line.Contains(ReasoningName, StringComparison.Ordinal)))
+              line.Contains(ReasoningName, StringComparison.Ordinal) ||
+              line.Contains(RefusalName, StringComparison.Ordinal)))
         {
             return line;
         }
@@ -214,6 +216,14 @@ internal sealed class OpenAiStreamNormalizingStream : Stream
         var hasReasoningContent = false;
         foreach (var property in element.EnumerateObject())
         {
+            if (property.NameEquals(RefusalName) && !IsNonEmptyString(property.Value))
+            {
+                // Bridges that stamp "refusal": "" on every frame make M.E.AI surface an
+                // ErrorContent("Refusal") with no text, which Direct reads as a provider refusal.
+                changed = true;
+                continue;
+            }
+
             if (property.NameEquals(ToolCallsName) && property.Value.ValueKind == JsonValueKind.Array)
             {
                 WriteToolCalls(property, writer, ref changed);

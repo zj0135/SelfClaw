@@ -306,15 +306,16 @@ internal sealed class DirectTurnRun
     {
         var contents = response.Messages.SelectMany(message => message.Contents).ToArray();
         var errors = contents.OfType<ErrorContent>().ToArray();
-        if (response.FinishReason == ChatFinishReason.ContentFilter ||
-            errors.Any(error => error.ErrorCode == "Refusal"))
+        if (response.FinishReason == ChatFinishReason.ContentFilter || errors.Any(IsRefusal))
         {
             return DirectLoopOutcome.ContentFiltered;
         }
 
-        if (errors.Length > 0)
+        // An empty refusal is a wire artifact, not a provider error: an OpenAI-compatible gateway that
+        // stamps "refusal": "" on every frame would otherwise fail every turn it serves.
+        if (errors.FirstOrDefault(error => !IsEmptyRefusal(error)) is { } error)
         {
-            throw new InvalidDataException($"The provider returned an error: {errors[0].Message}");
+            throw new InvalidDataException($"The provider returned an error: {error.Message}");
         }
 
         if (response.FinishReason == ChatFinishReason.Length)
@@ -335,6 +336,12 @@ internal sealed class DirectTurnRun
 
         return null;
     }
+
+    private static bool IsRefusal(ErrorContent error) =>
+        error.ErrorCode == "Refusal" && !string.IsNullOrWhiteSpace(error.Message);
+
+    private static bool IsEmptyRefusal(ErrorContent error) =>
+        error.ErrorCode == "Refusal" && string.IsNullOrWhiteSpace(error.Message);
 
     private static bool HasResponseContent(AIContent content) => content switch
     {
