@@ -41,6 +41,7 @@ internal sealed class McpCapabilitySource
 
     public async Task<McpCapabilities> ResolveAsync(
         DirectChatTurnRequest request,
+        DirectTurnPolicy policy,
         DirectTurnLeaseScope leases,
         TurnDiagnostics diagnostics,
         IReadOnlyDictionary<string, string> effectivePluginRoots,
@@ -52,7 +53,6 @@ internal sealed class McpCapabilitySource
         }
 
         var servers = await _serverRepository.ListMcpServersAsync(cancellationToken).ConfigureAwait(false);
-        var policy = DirectTurnPolicy.For(request);
         var effectiveServers = servers
             .Where(server => server.IsEnabled &&
                              (string.IsNullOrWhiteSpace(server.SourcePluginId)

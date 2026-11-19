@@ -251,7 +251,7 @@ internal sealed class DirectTurnCapabilityLease : IAsyncDisposable
 }
 ```
 
-`MessageAdjustments` 是 message id -> 改写后文本的映射，承载 §8.2/§8.4 的 skill token 剥离结果（最新 user message 与历史中匹配有效 Skill 的 token）。没有这个输出，token 剥离就只能散落回 runtime 或 prompt composer 里重复解析——lease 是 resolver 对外的唯一产物，改写必须随之携带。`DirectHistoryReplay` 组装重放单元时以该映射覆盖对应 `MessageRecord.MarkdownContent`；数据库与 Vue 中的原始消息不变。
+`MessageAdjustments` 是 message id -> 改写后文本的映射，承载 §8.2/§8.4 的 skill token 剥离结果（只有最新 user message 里本轮消费掉的 token；历史消息保留原文，见 §8.4）。没有这个输出，token 剥离就只能散落回 runtime 或 prompt composer 里重复解析——lease 是 resolver 对外的唯一产物，改写必须随之携带。`DirectHistoryReplay` 组装重放单元时以该映射覆盖对应 `MessageRecord.MarkdownContent`；数据库与 Vue 中的原始消息不变。
 
 配置启停、更新或删除时：
 
@@ -585,10 +585,10 @@ Direct system message 使用稳定顺序：
 
 ### 8.4 跨回合语义与历史 token
 
-`BuildMessages()` 只重放 user/assistant 文本（§1.4），因此 Skill 激活天然是**每轮重置**的，必须作为明确语义写死，避免实现时臆造“会话级激活状态”：
+Skill 激活状态**不是持久化的会话状态**，它在每回合准备时从这次请求会重放的历史里推导出来（2026-11 修订，原先每轮无条件重置）：
 
-1. **激活不跨回合**。上一轮 `activate_skill` 拿到的 `SKILL.md` 与显式激活注入的 system section 都不会出现在下一轮请求里；下一轮回到紧凑目录，模型需要时可再次 activate（目录与工具说明会告知这一点）。不引入“会话已激活集合”这类可变状态。
-2. **历史消息中的 token**。激活语义只由最新 user message 触发。组装请求时，历史 user 消息中匹配“本轮有效 Skill”的 token 一并从文本中剥离（它们是当轮已消费的指令，留在历史里只会诱导模型模仿该记号）；无法匹配任何有效 Skill 的历史 token 保留原文、不失败——只有最新消息里的未知 token 才按显式激活规则失败。数据库与 Vue 中的原始消息始终不变。
+1. **激活随历史重放而延续**。工具往返现在整体重放，所以上一轮 `activate_skill` 的结果（`SKILL.md` 全文）仍在模型眼前。`SkillCapabilitySource.FindReplayedActivations` 把「状态 Completed、所属消息仍在重放范围内（压缩边界之后且回合可重放）、id 仍解析为有效 Skill」的 `activate_skill` 调用恢复为已激活，交给 `SkillRuntimeToolset.CreateTools` 的 `restoredSkillIds`：`read_skill_resource` / `run_skill_script` / `list_skill_resources` 直接可用，再次 `activate_skill` 只回「已激活」而不重复注入全文。原先的每轮重置会让工具拒绝一个历史里明明显示已激活的 Skill，模型只能多走一个往返、把同一份全文再注入一遍。一旦压缩覆盖了那次激活，全文不在 prompt 里了，激活也随之失效，回到紧凑目录。恢复的 Skill 不占本回合 5 个激活名额（名额限制的是本回合新增进 prompt 的全文）。**显式激活（`[/id]`）仍只作用于当回合**：它的全文在 system section 里而不在历史里，下一轮不会延续。仍然不引入持久化的“会话已激活集合”。
+2. **历史消息中的 token**。激活语义只由最新 user message 触发，也只有最新消息里本轮消费掉的 token 会从发给 provider 的文本中剥离（它们的全文已在本轮 system section 里）。历史 user 消息里的 token **一律保留原文**、不失败：显式激活只管一回合，如果把历史 token 也剥掉，后续回合的模型既看不到 Skill 全文、也看不到用户曾经点名过它的任何痕迹；保留下来，目录段会说明「更早消息里的 `[/skill-id]` 只在那一回合激活过该 Skill，仍需要就再 `activate_skill`」。这同时去掉了每回合对全部历史消息做 token 扫描的成本。只有最新消息里的未知 token 才按显式激活规则失败。数据库与 Vue 中的原始消息始终不变。
 3. **CLI 回合原样透传**。composer 模式覆盖允许同一会话临时切到 CLI（`ResolveComposerExecutionMode()`）。CLI 分支的 `ExtractPrompt()` 只取最新 user 文本，SelfClaw 不解析、不剥离、不失败，token 作为字面文本交给 CLI；`SkillPicker` 在生效模式为 CLI 时隐藏（§12.6），但用户手打的 token 不做拦截。
 4. **审计**。显式激活在能力解析阶段完成、没有 function call，本轮激活的 Skill 列表记入 `DirectTurnCapabilityLease.Diagnostics`（信息级），保证事后能从日志还原“这轮注入了什么”。
 
@@ -1169,7 +1169,7 @@ AGENTS.md 的 DI Registration 清单与 schema version 记录在 P4 一并更新
 - Plugin contribution 展开与 namespace；
 - 空绑定不意外启用全局项；
 - 显式 Skill 激活、未知 token 失败、最多 3 个、resource 路径逃逸；
-- `MessageAdjustments`：最新消息 token 剥离、历史消息中有效 Skill token 剥离、无法解析的历史 token 保留且不失败（§8.4）；
+- `MessageAdjustments`：只剥离最新消息的 token，历史消息的 token 一律保留原文且不失败（§8.4）；
 - 激活上限（显式 + 按需合计）与 `activate_skill` 幂等；无有效 Skill 时不注册 loader 工具与目录；
 - workspace 缺失时 `requiresWorkspace` 的行为；
 - workspace/Skill/MCP tool 命名唯一；

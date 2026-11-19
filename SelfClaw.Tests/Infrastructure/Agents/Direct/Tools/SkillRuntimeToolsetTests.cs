@@ -159,12 +159,13 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
         var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([skill], ["review"]);
         var read = FindFunction(tools, SkillRuntimeToolset.ReadSkillResourceToolName);
 
-        Func<Task> escapeAction = async () => await read.InvokeAsync(new AIFunctionArguments
+        // A wrong path is the model's to correct: it comes back as a Failed result, not as a tool fault that
+        // would count against the turn.
+        (await InvokeFailedAsync(read, new()
         {
             ["skillId"] = "review",
             ["relativePath"] = "../outside.md"
-        });
-        await escapeAction.Should().ThrowAsync<InvalidDataException>();
+        })).Should().Contain("unsafe segment");
         (await InvokeStringAsync(read, new()
         {
             ["skillId"] = "review",
@@ -217,13 +218,13 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
         var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([skill], ["review"]);
         var read = FindFunction(tools, SkillRuntimeToolset.ReadSkillResourceToolName);
 
-        Func<Task> action = async () => await read.InvokeAsync(new AIFunctionArguments
+        var rejection = await InvokeFailedAsync(read, new()
         {
             ["skillId"] = "review",
             ["relativePath"] = "linked/secret.md"
         });
 
-        await action.Should().ThrowAsync<InvalidDataException>();
+        rejection.Should().Contain("reparse points");
     }
 
     [Fact]
@@ -288,13 +289,60 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
         var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([skill], ["review"]);
         var list = FindFunction(tools, SkillRuntimeToolset.ListSkillResourcesToolName);
 
-        Func<Task> action = async () => await list.InvokeAsync(new AIFunctionArguments
+        var rejection = await InvokeFailedAsync(list, new()
         {
             ["skillId"] = "review",
             ["relativeDirectory"] = relativeDirectory
         });
 
-        await action.Should().ThrowAsync<InvalidDataException>();
+        rejection.Should().StartWith("Skill resource path");
+    }
+
+    [Fact]
+    public async Task RunSkillScript_rejects_an_escaping_path_as_a_failed_result()
+    {
+        var skill = CreateSkill("review", "instructions");
+        var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools([skill], ["review"]);
+        var run = FindFunction(tools, SkillRuntimeToolset.RunSkillScriptToolName);
+
+        (await InvokeFailedAsync(run, new()
+        {
+            ["skillId"] = "review",
+            ["relativePath"] = "../outside.ps1"
+        })).Should().Contain("unsafe segment");
+    }
+
+    [Fact]
+    public async Task A_skill_restored_from_the_replayed_history_is_usable_without_a_second_activation()
+    {
+        var skills = Enumerable.Range(1, 7)
+            .Select(index => CreateSkill($"skill-{index}", $"content-{index}", ("notes.md", $"notes-{index}")))
+            .ToArray();
+        var tools = new SkillRuntimeToolset(new SkillScriptRunner()).CreateTools(
+            skills, [], restoredSkillIds: ["skill-1", "skill-2"]);
+        var activate = FindFunction(tools, SkillRuntimeToolset.ActivateSkillToolName);
+        var read = FindFunction(tools, SkillRuntimeToolset.ReadSkillResourceToolName);
+
+        (await InvokeStringAsync(read, new() { ["skillId"] = "skill-1", ["relativePath"] = "notes.md" }))
+            .Should().Contain("notes-1");
+        (await InvokeStringAsync(activate, new() { ["skillId"] = "skill-2" }))
+            .Should().Contain("already activated", "its body is already in the history and must not be injected twice");
+        // A restored Skill adds no body to this turn's prompt, so it does not use up the turn's allowance.
+        foreach (var index in Enumerable.Range(3, 5))
+        {
+            (await InvokeStringAsync(activate, new() { ["skillId"] = $"skill-{index}" }))
+                .Should().StartWith($"content-{index}");
+        }
+    }
+
+    [Theory]
+    [InlineData("{\"skillId\":\"review\"}", "review")]
+    [InlineData("{\"skillId\":7}", null)]
+    [InlineData("[]", null)]
+    [InlineData("not json", null)]
+    public void ReadActivatedSkillId_reads_only_a_well_formed_call(string argumentsJson, string? expected)
+    {
+        SkillRuntimeToolset.ReadActivatedSkillId(argumentsJson).Should().Be(expected);
     }
 
     [Fact]
@@ -436,6 +484,13 @@ public sealed class SkillRuntimeToolsetTests : IDisposable
         AIFunction function,
         AIFunctionArguments arguments)
         => (await function.InvokeAsync(arguments)).Should().BeOfType<DirectToolResult>().Which;
+
+    private static async Task<string> InvokeFailedAsync(AIFunction function, AIFunctionArguments arguments)
+    {
+        var result = (await function.InvokeAsync(arguments)).Should().BeOfType<DirectToolResult>().Subject;
+        result.Status.Should().Be(ToolCallStatus.Failed);
+        return result.Summary;
+    }
 
     private static async Task<string> InvokeStringAsync(
         AIFunction function,

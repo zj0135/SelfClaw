@@ -172,6 +172,34 @@ public sealed class DirectSteerLoopIntegrationTests
         (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single().Status.Should().Be(ConversationTurnStatus.Failed);
     }
 
+    /// <summary>
+    /// Mid-task an oversized steer fails the turn (above); after the final answer it must not: the answer is
+    /// complete, so the input is held and the turn ends as it stood.
+    /// </summary>
+    [Fact]
+    public async Task A_late_steer_that_cannot_fit_after_the_final_answer_is_held_and_the_answer_stands()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        ConversationInputRecord? accepted = null;
+        var provider = new SteerProvider { ToolNames = [] };
+        var session = new AcceptOnSecondEmptyInputSession(context.InputSession, async () =>
+            accepted = await PromoteSteerAsync(context, new string('x', 20_000)));
+        var runtime = CreateRuntime(context, provider, out var request, contextWindowTokens: 4200, inputSession: session);
+
+        var result = await RecordAsync(runtime, request, context).WaitAsync(Timeout);
+
+        result.Terminals.Should().Be(1);
+        result.Terminal!.Status.Should().Be(RunCompletionStatus.Succeeded);
+        provider.Requests.Should().HaveCount(1, "the held steer buys no further request");
+        var stored = (await context.Inputs.GetInputAsync(accepted!.Id))!;
+        stored.Status.Should().Be(ConversationInputStatus.Held);
+        (await context.ScalarAsync("SELECT reason_code FROM conversation_inputs;"))
+            .Should().Be(ConversationInputReason.ContextBudgetExceeded);
+        (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single().Status
+            .Should().Be(ConversationTurnStatus.Succeeded);
+    }
+
     [Fact]
     public async Task A_steer_accepted_during_the_final_close_check_is_still_consumed_this_turn()
     {

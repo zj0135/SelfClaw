@@ -304,18 +304,21 @@ else                          { arguments = { elided: true }; resultText = Elide
 
 ### 7.2 位置与形状
 
-紧跟 summary section 之后、capability sections 之前：
+永远是 system 文本的最后一段（2026-11 修订，原先夹在 summary 与 capability sections 之间）：
 
 ```
 [agent instructions]
 [compression summary]
+[capability sections]
+[in-turn summary]            仅回合内压缩之后
 [SelfClaw Plan]
 The task plan as it stood when the history above was summarized. A newer todo_write in the history supersedes it.
 - [x] 检查 Direct 工具装配
 - [~] 新增 todo_write 工具
 - [ ] 投影到 transcript 卡片
-[capability sections]
 ```
+
+- 放最后的原因：它是唯一会在回合内被替换或撤掉的段。夹在中间时，回合开始的那一份被烤进起始文本、回合内无法替换，只能再追加一份，于是出现新旧两个 `[SelfClaw Plan]`。现在起始文本（`DirectSystemPrompt.BuildSystemText`）不含计划段，`DirectConversationContext` 持有唯一的 `_planSection` 并在合成时接在最后，替换它不改写前面任何字节。
 
 - 快照语义：**不随新的 `todo_write` 更新**。更新意味着又一次改变 system → 又一次前缀失效，而新计划本来就在 history 里。
 - 只在存在未完成项时注入；全部完成不注入（没有「继续做」的价值）。
@@ -328,21 +331,23 @@ The task plan as it stood when the history above was summarized. A newer todo_wr
 ```csharp
 var plan = TodoPlanHistory.FindLatest(request.Messages, request.ToolExecutions ?? []);
 // 计数与最终请求必须用同一个 compression 求同一个 section
-CountTurnStart(input, boundary: request.Compression, TodoSection(plan, request.Compression));   // DirectPromptMeter.CountTurnStartPrompt
-CountTurnStart(input, boundary: compressionAfter,     TodoSection(plan, compressionAfter));       // 压缩后重算
-DirectSystemPrompt.BuildSystemText(..., compression: compressionAfter, TodoSection(plan, compressionAfter));
+var prompt = DescribePrompt(input, boundary);   // (boundary, BuildSystemText(..., boundary), TodoSection(plan, boundary))
+CountTurnStart(input, prompt);                  // 计数 JoinSections(prompt.SystemText, prompt.TodoSection)
+// 压缩成功后对新的 boundary 再走一遍；DirectTurnPreparer 直接发送返回值里的 SystemText 与 TodoSection，不再自己重建
 ```
 
 `DirectPromptMeter.CountTurnStartPrompt`（经 `DirectCompactionStep.CountTurnStart`）在压缩前后各调用一次（分别对应 `request.Compression` 与新产生的 `compression`），两次都必须按各自传入的 boundary 计算 section，否则 `EnsureTurnStartPromptFitsWindow` 算出的尺寸与真实请求不一致。
 
 **in-turn**（`DirectConversationContext.ApplyInTurnCompaction`）
 
-被移除的 unit 就是要覆盖的范围，直接在其中找 `todo_write`：
+看本回合全部 unit 里**最新**的那份计划落在哪：
 
 ```csharp
-var removed = 被移除的 entries 的 Messages;          // 现有循环里已经知道移除的是哪些
-var section = TodoPlanSection.BuildCovered(removed);  // 未覆盖到计划则 null
+if (FindCoveredPlan(coveredUnitCount) is { } coveredPlan)   // 最新计划在被覆盖的前缀里
+    _planSection = TodoPlanSection.Build(coveredPlan);      // 可以是 null：计划已全部完成
 ```
+
+`FindCoveredPlan` 返回 null 表示「不要动现有的段」——本回合没有计划，或最新计划仍在保留的 unit 里（它在 history 中自己会取代快照）。它**不**表示「计划没了」，两者不能混为一谈。
 
 - 不需要新的 setup 字段，也不需要共享可变状态：上下文自己就知道删掉了什么。
 - 这一步必须做：长回合里计划通常写在开头，而 in-turn 压缩覆盖的正是**最老的** unit——计划恰恰最先被吞掉。
@@ -350,12 +355,11 @@ var section = TodoPlanSection.BuildCovered(removed);  // 未覆盖到计划则 n
 
 ### 7.4 去重
 
-turn-start 与 in-turn 两个 section 可能同时存在（先有压缩，回合内又压缩一次）。若两次快照文本相同，只保留一份：
+不存在去重问题：回合开始决定的计划段作为 `_planSection` 的初值交给上下文，回合内覆盖到更新的计划时**整体替换**它。因此
 
-```csharp
-if (!string.IsNullOrEmpty(section) && !string.Equals(section, _planSection, StringComparison.Ordinal))
-    _planSection = section;
-```
+- 回合内覆盖到一份更新的计划 → 旧快照被新快照取代，system 里永远只有一个 `[SelfClaw Plan]`；
+- 回合内覆盖到的最新计划已全部完成 → 段被撤掉。此时 history 里已没有任何 `todo_write` 能取代旧快照，留着它等于把一份过期计划当成当前计划交给模型；
+- 两次快照文本相同 → 赋同样的值，仍只有一份。
 
 ### 7.5 缓存影响验证
 

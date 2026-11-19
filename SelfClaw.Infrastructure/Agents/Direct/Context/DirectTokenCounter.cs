@@ -294,6 +294,11 @@ internal sealed class DirectTokenCounter : IDirectTokenCounter
                 case TextContent text:
                     AddPart(parts, text.Text);
                     break;
+                case TextReasoningContent reasoning:
+                    // Only a response of the running turn still carries reasoning (stored history replays
+                    // without it), and every protocol sends that reasoning back with the tool results.
+                    AddPart(parts, reasoning.Text);
+                    break;
                 case DataContent:
                     // Binary content has no text to tokenize. Every DataContent Direct sends is an image.
                     imageCount++;

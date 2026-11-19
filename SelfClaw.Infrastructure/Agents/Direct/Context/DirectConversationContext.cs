@@ -20,7 +20,6 @@ internal sealed class DirectConversationContext
     private sealed record ContextEntry(IReadOnlyList<ChatMessage> Messages, long SourceSequence, bool IsProtected);
 
     private readonly string? _systemText;
-    private readonly string? _turnStartPlanSection;
     private readonly List<ContextEntry> _entries;
     private long _nextUnitSequence;
     private string? _inTurnSummary;
@@ -33,12 +32,13 @@ internal sealed class DirectConversationContext
         string? systemText,
         IReadOnlyList<DirectPromptHistoryUnit> initialUnits,
         IReadOnlyList<ChatMessage> trailingProtectedMessages,
-        string? turnStartPlanSection = null)
+        string? planSection = null)
     {
         ArgumentNullException.ThrowIfNull(initialUnits);
         ArgumentNullException.ThrowIfNull(trailingProtectedMessages);
         _systemText = systemText;
-        _turnStartPlanSection = turnStartPlanSection;
+        // The section the turn start decided on. It stays until an in-turn compaction covers a newer plan.
+        _planSection = planSection;
         _entries = new List<ContextEntry>(initialUnits.Count + trailingProtectedMessages.Count);
         foreach (var unit in initialUnits)
         {
@@ -163,12 +163,12 @@ internal sealed class DirectConversationContext
 
         // A plan written into the units this summary now covers would otherwise vanish from the model's view, and
         // it is exactly the oldest units that in-turn compaction takes first. It has to be read before the units
-        // go, and assigned before Recompose, which is what puts the section into the system text.
-        if (FindCoveredPlan(coveredUnitCount) is { } coveredPlan &&
-            TodoPlanSection.Build(coveredPlan) is { } section &&
-            !string.Equals(section, _planSection, StringComparison.Ordinal))
+        // go, and assigned before Recompose, which is what puts the section into the system text. The covered
+        // plan replaces whatever section was there, including with nothing: a finished plan must not leave an
+        // older snapshot behind as if it were still the current one.
+        if (FindCoveredPlan(coveredUnitCount) is { } coveredPlan)
         {
-            _planSection = section;
+            _planSection = TodoPlanSection.Build(coveredPlan);
         }
 
         var removed = 0;
@@ -192,7 +192,8 @@ internal sealed class DirectConversationContext
     }
 
     // Only the newest plan of the turn decides: a newer todo_write in a retained unit is still in the history,
-    // so an older covered snapshot must not resurface behind it.
+    // so an older covered snapshot must not resurface behind it. Null therefore means "leave the section alone"
+    // (no plan in this turn's units, or the newest one is still replayed), never "the plan is gone".
     private TodoPlan? FindCoveredPlan(int coveredUnitCount)
     {
         var unitIndex = -1;
@@ -232,27 +233,13 @@ internal sealed class DirectConversationContext
         _messages = composed;
     }
 
-    // The in-turn summary is wrapped into its section here, so the format stays owned by DirectSystemPrompt, and
-    // it is appended at the end of the prompt's own system text: the sections the turn started with keep their
-    // exact byte layout, and this path only exists once in-turn compaction ran.
+    // The sections that can change mid-turn go after the text the turn started with, so that text keeps its
+    // exact byte layout (and the provider's prefix cache) however often the summary or the plan is replaced.
     private string? ComposeSystemText()
-    {
-        // A turn-start snapshot may already sit in the system text this turn began with; the same list must not
-        // be paid for twice when an in-turn compaction covers it again (design §7.4). The turn start hands that
-        // section over explicitly, so the two are compared as the same string rather than by containment.
-        var planSection = string.Equals(_planSection, _turnStartPlanSection, StringComparison.Ordinal)
-            ? null
-            : _planSection;
-        var sections = new[]
-            {
-                _systemText,
-                _inTurnSummary is null ? null : DirectSystemPrompt.CreateSummarySection(_inTurnSummary),
-                planSection
-            }
-            .Where(section => !string.IsNullOrWhiteSpace(section))
-            .ToArray();
-        return sections.Length == 0 ? null : string.Join("\n\n", sections);
-    }
+        => DirectSystemPrompt.JoinSections(
+            _systemText,
+            _inTurnSummary is null ? null : DirectSystemPrompt.CreateSummarySection(_inTurnSummary),
+            _planSection);
 
     // In-turn units are identified by a synthetic sequence because the recorder owns the stored message
     // sequences. Compaction only ever considers units with a positive one, so the counter starts above the

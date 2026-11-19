@@ -84,22 +84,9 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         var policy = DirectTurnPolicy.For(request);
         var packages = await _packageRepository.ListPackagesAsync(cancellationToken).ConfigureAwait(false);
         var effectiveRequest = CreateEffectiveRequest(request, policy, packages, diagnostics);
-        // Read per turn so the run_shell_command binding (parent and subagent turns alike, they share
-        // this path) describes the shell the user currently has selected.
-        var shellPreference = await _shellPreference.GetPreferenceAsync(cancellationToken).ConfigureAwait(false);
-        var bindings = effectiveRequest.WorkspaceRoot is null
-            ? new List<DirectToolBinding>()
-            : _workspaceToolset.CreateTools(effectiveRequest.WorkspaceRoot, shellPreference, imageCapability).ToList();
-        // The plan does not depend on a workspace, so it binds outside the branch above.
-        if (policy.AllowsTodoPlan)
-        {
-            bindings.AddRange(_todoToolset.CreateTools());
-        }
-        if (policy.AllowsUserQuestion && request.UserQuestionHandler is { } questionHandler)
-        {
-            bindings.AddRange(_askUserToolset.CreateTools(questionHandler));
-        }
         ValidateCapturedPackageCeiling(effectiveRequest, policy, packages);
+        var bindings = await CreateBuiltInBindingsAsync(effectiveRequest, policy, imageCapability, cancellationToken)
+            .ConfigureAwait(false);
         var installedSkills = packages
             .Where(package => package.Kind == ExtensionKind.Skill)
             .ToDictionary(package => package.Id, StringComparer.OrdinalIgnoreCase);
@@ -118,6 +105,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             .ConfigureAwait(false);
         var skills = await _skillSource.ResolveAsync(
                 effectiveRequest,
+                policy,
                 installedSkills,
                 effectiveSkills,
                 plugins.Skills,
@@ -125,12 +113,9 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
                 cancellationToken)
             .ConfigureAwait(false);
         bindings.AddRange(skills.Tools);
-
-        var systemInstructions = new List<string>();
-        systemInstructions.AddRange(plugins.Instructions);
-        systemInstructions.AddRange(skills.Instructions);
         var mcpCapabilities = await _mcpSource.ResolveAsync(
                 effectiveRequest,
+                policy,
                 leases,
                 diagnostics,
                 plugins.PluginRoots,
@@ -147,7 +132,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
         bindings.AddRange(mcpCapabilities.Tools);
         var subagents = _subagentSource.Resolve(effectiveRequest, effectiveCeiling);
         bindings.AddRange(subagents.Tools);
-        systemInstructions.AddRange(subagents.Instructions);
+        List<string> systemInstructions = [.. plugins.Instructions, .. skills.Instructions, .. subagents.Instructions];
         if (diagnostics.Degradations.Count > 0)
         {
             systemInstructions.Add(CapabilitySections.Degradation(diagnostics.Degradations));
@@ -166,6 +151,35 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
             diagnostics.Messages,
             leases,
             skills.ExplicitSkillIds);
+    }
+
+    // The tools SelfClaw ships itself. Which of them a turn gets depends only on its workspace and its origin.
+    private async Task<List<DirectToolBinding>> CreateBuiltInBindingsAsync(
+        DirectChatTurnRequest request,
+        DirectTurnPolicy policy,
+        ToolImageCapability imageCapability,
+        CancellationToken cancellationToken)
+    {
+        var bindings = new List<DirectToolBinding>();
+        if (request.WorkspaceRoot is { } workspaceRoot)
+        {
+            // Read per turn so the run_shell_command binding (parent and subagent turns alike, they share
+            // this path) describes the shell the user currently has selected.
+            var shellPreference = await _shellPreference.GetPreferenceAsync(cancellationToken).ConfigureAwait(false);
+            bindings.AddRange(_workspaceToolset.CreateTools(workspaceRoot, shellPreference, imageCapability));
+        }
+
+        if (policy.AllowsTodoPlan)
+        {
+            bindings.AddRange(_todoToolset.CreateTools());
+        }
+
+        if (policy.AllowsUserQuestion && request.UserQuestionHandler is { } questionHandler)
+        {
+            bindings.AddRange(_askUserToolset.CreateTools(questionHandler));
+        }
+
+        return bindings;
     }
 
     internal static IReadOnlyList<DirectToolBinding> BindTools(

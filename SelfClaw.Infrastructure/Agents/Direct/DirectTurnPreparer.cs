@@ -188,16 +188,11 @@ internal sealed class DirectTurnPreparer
         DirectCompactionStep.EnsureTurnStartPromptFitsWindow(budget, compaction);
         writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
 
-        // The section is the one compaction already counted, so the request that is sized and the request
-        // that is sent can never disagree about it.
+        // The system text and the plan section are the ones compaction already counted, so the request that
+        // is sized and the request that is sent can never disagree about them.
         var build = DirectHistoryReplay.Compose(
             units,
-            DirectSystemPrompt.BuildSystemText(
-                request.Agent.Instructions,
-                capabilityLease.SystemInstructions,
-                request.ExecutionContext,
-                compaction.Compression,
-                compaction.TodoSection),
+            compaction.SystemText,
             DirectSystemPrompt.BuildTrailingProtectedMessages(request.ExecutionContext),
             compaction.Compression);
         return new DirectTurnSetup(

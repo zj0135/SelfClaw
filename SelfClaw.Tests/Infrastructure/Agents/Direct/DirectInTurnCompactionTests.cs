@@ -63,6 +63,39 @@ public sealed class DirectInTurnCompactionTests
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
     }
 
+    /// <summary>
+    /// The local count cannot see everything a provider bills (reasoning signatures, large images, a foreign
+    /// tokenizer). The previous request's measured input is a prefix of the prompt being checked, so it may
+    /// start the compaction the local count alone would have put off until the window overflowed.
+    /// </summary>
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData(260, 1)]
+    public async Task The_previous_requests_measured_input_can_start_compaction_the_local_count_missed(
+        int? measuredInputTokens, int expectedCompactions)
+    {
+        IReadOnlyList<ChatResponseUpdate> toolRound =
+        [
+            Finish("tool-1", ChatFinishReason.ToolCalls, new TextContent("AA"),
+                new FunctionCallContent("call-1", "probe", new Dictionary<string, object?>()))
+        ];
+        if (measuredInputTokens is int measured)
+        {
+            toolRound = [.. toolRound, new ChatResponseUpdate(ChatRole.Assistant,
+                [new UsageContent(new UsageDetails { InputTokenCount = measured, OutputTokenCount = 5 })])];
+        }
+
+        var client = new ScriptedClient([toolRound, [Finish("final", ChatFinishReason.Stop, new TextContent("done"))]]);
+        var factory = CreateFactory(client);
+        var runtime = CreateRuntime(factory, policy: Policy(260));
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+
+        client.SummaryCalls.Should().HaveCount(expectedCompactions);
+        events.OfType<InTurnContextCompactionCompletedEvent>().Should().HaveCount(expectedCompactions);
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
+    }
+
     [Fact]
     public async Task Growth_below_the_threshold_sends_the_full_history_without_compaction()
     {

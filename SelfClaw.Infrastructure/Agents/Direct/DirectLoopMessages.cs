@@ -9,6 +9,18 @@ internal static class DirectLoopMessages
 {
     internal const string BudgetExhaustedReason = "BudgetExhausted";
     internal const string BatchAbortedReason = "BatchAborted";
+    internal const string ContentFilterReason = "ProviderContentFilter";
+    internal const string OutputTruncatedReason = "OutputTruncated";
+    internal const string ProviderErrorReason = "ProviderError";
+
+    internal const string ContentFilterCanceledCall =
+        "The provider filtered or refused this response; the tool was not executed.";
+
+    internal const string OutputTruncatedCanceledCall =
+        "The response reached the output-token limit before the turn could run this tool; the tool was not executed.";
+
+    internal const string ProviderErrorCanceledCall =
+        "The provider returned an invalid or failed response; the tool was not executed.";
 
     private static readonly string RequestLimitPhrase =
         $"reached its {DirectTurnRun.MaximumProviderRequestsPerTurn} provider request limit";

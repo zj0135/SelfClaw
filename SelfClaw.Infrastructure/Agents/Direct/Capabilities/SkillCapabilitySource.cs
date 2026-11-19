@@ -41,6 +41,7 @@ internal sealed class SkillCapabilitySource
 
     public async Task<SkillCapabilities> ResolveAsync(
         DirectChatTurnRequest request,
+        DirectTurnPolicy policy,
         IReadOnlyDictionary<string, ExtensionPackageRecord> installedSkills,
         IReadOnlyDictionary<string, ExtensionPackageRecord> effectiveSkills,
         IReadOnlyDictionary<string, ResolvedSkill> pluginSkills,
@@ -48,6 +49,7 @@ internal sealed class SkillCapabilitySource
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(policy);
         var latestUserMessage = request.Messages
             .Where(message => message.TurnId == request.TurnId &&
                               message.ConversationId == request.ConversationId &&
@@ -63,7 +65,6 @@ internal sealed class SkillCapabilitySource
                 diagnostics,
                 cancellationToken)
             .ConfigureAwait(false);
-        var policy = DirectTurnPolicy.For(request);
         foreach (var pluginSkill in pluginSkills)
         {
             if (policy.AllowsSkill(pluginSkill.Key))
@@ -88,14 +89,15 @@ internal sealed class SkillCapabilitySource
         if (resolvedSkills.Count > 0)
         {
             instructions.Add(CapabilitySections.SkillCatalog(resolvedSkills.Values, explicitIds));
-            tools.AddRange(_runtimeToolset.CreateTools(resolvedSkills.Values.ToArray(), explicitIds));
+            tools.AddRange(_runtimeToolset.CreateTools(
+                resolvedSkills.Values.ToArray(), explicitIds, FindReplayedActivations(request, resolvedSkills)));
             ReportUnavailableScripts(resolvedSkills.Values, request.Agent.ToolPolicy, diagnostics);
         }
 
         return new SkillCapabilities(
             instructions,
             tools,
-            CreateMessageAdjustments(request.Messages, latestUserMessage, explicitTokens, resolvedSkills),
+            CreateMessageAdjustments(latestUserMessage, explicitTokens),
             resolvedSkills.Keys.OrderBy(id => id, StringComparer.OrdinalIgnoreCase).ToArray(),
             explicitIds);
     }
@@ -176,33 +178,50 @@ internal sealed class SkillCapabilitySource
     }
 
     /// <summary>
-    /// Strips the tokens this turn consumed from the text sent to the provider. History keeps tokens that
-    /// no longer match an effective Skill: rewriting those would hide what the user actually typed, and
-    /// they cannot trigger activation anyway. The stored message is never modified.
+    /// Strips the tokens this turn consumed from the text sent to the provider: their Skill bodies are in this
+    /// turn's system prompt, so the marker itself would only be noise. Earlier messages keep their tokens. An
+    /// explicit activation lasts one turn, and with the token gone a later turn would show the model neither
+    /// the Skill body nor any trace that the user had asked for it; left in place, the marker lets the model
+    /// activate the Skill again from the catalog. The stored message is never modified.
     /// </summary>
-    private IReadOnlyDictionary<Guid, string> CreateMessageAdjustments(
-        IReadOnlyList<MessageRecord> messages,
+    private static IReadOnlyDictionary<Guid, string> CreateMessageAdjustments(
         MessageRecord? latestUserMessage,
-        IReadOnlyList<SkillToken> explicitTokens,
-        IReadOnlyDictionary<string, ResolvedSkill> effectiveSkills)
-    {
-        var adjustments = new Dictionary<Guid, string>();
-        foreach (var message in messages.Where(message => message.Role == MessageRole.User))
-        {
-            var consumedTokens = message.Id == latestUserMessage?.Id
-                ? explicitTokens
-                : _tokenParser.Parse(message.MarkdownContent)
-                    .Where(token => token.IsValid && effectiveSkills.ContainsKey(token.Id))
-                    .ToArray();
-            if (consumedTokens.Count == 0)
+        IReadOnlyList<SkillToken> explicitTokens)
+        => latestUserMessage is null || explicitTokens.Count == 0
+            ? new Dictionary<Guid, string>()
+            : new Dictionary<Guid, string>
             {
-                continue;
-            }
+                [latestUserMessage.Id] = SkillTokenParser.RemoveTokens(latestUserMessage.MarkdownContent, explicitTokens)
+            };
 
-            adjustments[message.Id] = SkillTokenParser.RemoveTokens(message.MarkdownContent, consumedTokens);
+    /// <summary>
+    /// The Skills an earlier turn activated whose activate_skill result this request still replays. The model
+    /// reads that body in its history, so refusing its resources as "not activated" would contradict what it
+    /// sees and cost a round trip that injects the same body twice. Once a compaction covers the activation the
+    /// body is gone from the prompt, and so is the activation.
+    /// </summary>
+    private static string[] FindReplayedActivations(
+        DirectChatTurnRequest request,
+        IReadOnlyDictionary<string, ResolvedSkill> resolvedSkills)
+    {
+        if (request.ToolExecutions is not { Count: > 0 } runs)
+        {
+            return [];
         }
 
-        return adjustments;
+        var replayedMessageIds = DirectHistoryReplay
+            .SelectReplayedMessages(request.Messages, request.Turns, request.Compression)
+            .Select(message => message.Id)
+            .ToHashSet();
+        return runs
+            .Where(run => run.ToolName == SkillRuntimeToolset.ActivateSkillToolName &&
+                          run.Status == ToolExecutionStatus.Completed &&
+                          run.MessageId is Guid messageId && replayedMessageIds.Contains(messageId))
+            .Select(run => SkillRuntimeToolset.ReadActivatedSkillId(run.ArgumentsJson))
+            .OfType<string>()
+            .Where(resolvedSkills.ContainsKey)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     /// <summary>

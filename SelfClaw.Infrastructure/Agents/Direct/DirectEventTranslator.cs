@@ -46,13 +46,6 @@ internal sealed class DirectEventTranslator(ChannelWriter<AgentStreamEvent> writ
         Write(new TurnInputBoundaryEvent(batch, _usage.Build()));
     }
 
-    /// <summary>
-    /// Publishes a lifecycle phase. The in-turn compaction path reports through here so its activity text is
-    /// covered by the same overwrite rule as the turn-start path.
-    /// </summary>
-    public void PublishRunStatus(AgentRunStatus status, string? detail = null)
-        => Write(new RunStatusEvent(status, detail));
-
     public void BeginInputSegment() => _finalText.Clear();
 
     /// <summary>

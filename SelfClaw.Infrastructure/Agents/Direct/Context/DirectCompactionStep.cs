@@ -4,7 +4,6 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Models;
-using SelfClaw.Infrastructure.AiProviders;
 
 namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 
@@ -47,9 +46,10 @@ internal sealed class DirectCompactionStep
 
     /// <summary>
     /// Decides and performs the turn-start compaction, before the first provider request so its summary is part
-    /// of that request. Returns the boundary the prompt should replay against, the measurement of the prompt
-    /// that carries it and the plan section it was counted with; a null measurement means counting is
-    /// unavailable and the turn degrades to an uncompacted, unchecked request (design §5.5).
+    /// of that request. Returns the boundary the prompt replays against together with the system text and plan
+    /// section that were counted with it, so the request that is sized and the request that is sent cannot
+    /// disagree. A null measurement means counting is unavailable (or nothing needed counting) and the turn
+    /// degrades to an uncompacted, unchecked request (design §5.5).
     /// </summary>
     internal async Task<DirectTurnStartCompaction> CompactTurnStartAsync(
         DirectTurnCompaction input,
@@ -57,80 +57,98 @@ internal sealed class DirectCompactionStep
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(input);
-        var section = TodoSection(input.PlanSnapshot, input.Request.Compression);
+        var uncompacted = DescribePrompt(input, input.Request.Compression);
         // Without a declared window and with compaction off, there is nothing to count: the meter waits for the
         // provider's own measurement instead of paying for a local one nobody decides on.
         if (input.Budget.ContextWindowTokens is null && !input.Policy.Enabled)
         {
-            return new DirectTurnStartCompaction(input.Request.Compression, null, section);
+            return uncompacted;
         }
 
-        if (CountTurnStart(input, input.Request.Compression, section) is not { } counted)
+        if (CountTurnStart(input, uncompacted) is not { } counted)
         {
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Initializing, CountingUnavailableDiagnostic));
-            return new DirectTurnStartCompaction(input.Request.Compression, null, section);
+            return uncompacted;
         }
 
+        // No estimate is published for an uncompacted prompt: the meter keeps the last measured context and
+        // updates when this request reports its own, so the displayed number has one source instead of two.
+        uncompacted = uncompacted with { Counted = counted };
         var plan = DirectCompactionPlanner.PlanCompression(
             counted.Units, input.Request.Compression, input.Policy, input.Budget, counted.PromptTokens,
             ObservedContextTokens(input.Request));
         if (!plan.ShouldCompress)
         {
-            // No estimate here: the meter keeps the last measured context and updates when this request reports
-            // its own, so the displayed number has exactly one source instead of two close ones.
-            return new DirectTurnStartCompaction(input.Request.Compression, counted, section);
+            return uncompacted;
         }
 
-        // Started is written before the summarization call so the transcript never sees a lone terminal, and
-        // EstimatedTokens stays reserve-free to match the context-size readout (design §8.1).
-        writer.TryWrite(new ContextCompactionStartedEvent(counted.PromptTokens, plan.ThresholdTokens));
-        writer.TryWrite(new RunStatusEvent(AgentRunStatus.Compacting));
         var result = await SummarizeAsync(
-            input.Request.ConversationId, input.Request.TurnId, input.Policy, input.ProviderLease, plan,
-            input.Request.Compression?.Summary, counted.PromptTokens, cancellationToken).ConfigureAwait(false);
+            new DirectCompressionRequest(
+                plan.PrefixUnits,
+                input.Request.Compression?.Summary,
+                plan.SourceTokens ?? counted.PromptTokens,
+                input.Policy.ModelProfileId,
+                input.ProviderLease,
+                input.Request.ConversationId,
+                input.Request.TurnId),
+            counted.PromptTokens, plan.ThresholdTokens, writer, cancellationToken).ConfigureAwait(false);
         if (result is null)
         {
-            writer.TryWrite(new ContextCompactionFailedEvent(CompactionFailedReason));
-            return new DirectTurnStartCompaction(input.Request.Compression, counted, section);
+            return uncompacted;
         }
 
-        var compression = CreateRecord(input.Request, plan, result);
-        if (result.UsedFallbackModel)
-        {
-            writer.TryWrite(new RunStatusEvent(AgentRunStatus.Compacting, CompactionFallbackDiagnostic));
-        }
-
+        var compression = new ConversationCompactionRecord(
+            Guid.NewGuid(),
+            input.Request.ConversationId,
+            input.Request.TurnId,
+            plan.ThroughSequence,
+            result.Summary,
+            result.Model,
+            result.SourceMessageCount,
+            result.SourceTokens,
+            result.SummaryTokens,
+            DateTimeOffset.UtcNow);
         writer.TryWrite(new ContextCompactionCompletedEvent(compression));
-        // The window check bounds what is actually sent, so it is re-run against the prompt that now carries the
-        // summary section in its system text. The estimate published from it is the post-summary size, so the
-        // meter shows the drop here rather than the pre-compaction figure.
-        var compactedSection = TodoSection(input.PlanSnapshot, compression);
-        var recounted = CountTurnStart(input, compression, compactedSection);
+        // The window check bounds what is actually sent, so the prompt is counted again with the summary in
+        // its system text. The estimate published from it is the post-summary size, so the meter shows the
+        // drop here rather than the pre-compaction figure.
+        var compacted = DescribePrompt(input, compression);
+        var recounted = CountTurnStart(input, compacted);
         if (recounted is not null)
         {
             writer.TryWrite(DirectEventTranslator.CreateContextEstimate(
-                recounted.PromptTokens, AiChatOptions.ResolveContextWindowTokens(input.ProviderLease.Profile)));
+                recounted.PromptTokens, input.Budget.ContextWindowTokens));
         }
 
-        return new DirectTurnStartCompaction(compression, recounted, compactedSection);
+        return compacted with { Counted = recounted };
     }
 
     /// <summary>
-    /// The in-turn compaction checkpoint (design §3.1). Every early return means "send this turn uncompacted":
-    /// a failed summary, unavailable counting or an exhausted allowance never removes content or ends the turn.
-    /// Only a compaction that still leaves the prompt over the window fails the turn (decision A).
+    /// The in-turn checkpoint (design §3.1), run before every request after the first: compact when the
+    /// context reached the threshold, then refuse a prompt that still cannot fit. A failed summary, unavailable
+    /// counting or an exhausted allowance never removes content; only a prompt over the declared window fails
+    /// the turn, because sending it would come back as an opaque provider error. The window check runs every
+    /// round, not only after a summary: once the allowance is spent nothing shrinks the prompt any more.
     /// </summary>
-    internal async Task CompactInTurnAsync(
+    /// <param name="observedInputTokens">
+    /// The provider's measurement of this turn's previous request. That prompt is a strict prefix of the one
+    /// being checked (a response and its tool results were appended since, and a summary can only have been
+    /// applied before that request was sent), so it is a safe lower bound for the trigger when the local count
+    /// runs low: reasoning signatures, high-resolution images and a foreign tokenizer are all invisible to it.
+    /// </param>
+    internal async Task CheckpointInTurnAsync(
         DirectTurnSetup setup,
         DirectConversationContext context,
         InTurnCompactionAllowance allowance,
+        int? observedInputTokens,
         ChannelWriter<AgentStreamEvent> writer,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(setup);
         ArgumentNullException.ThrowIfNull(context);
         ArgumentNullException.ThrowIfNull(allowance);
-        if (!setup.CompressionPolicy.Enabled || allowance.IsExhausted)
+        // Neither decision exists without a window or an enabled policy, so such a model pays for no count.
+        if (setup.Budget.ContextWindowTokens is null && !setup.CompressionPolicy.Enabled)
         {
             return;
         }
@@ -140,44 +158,29 @@ internal sealed class DirectCompactionStep
             return;
         }
 
-        // The reserve belongs to the trigger side: a prompt just under the threshold can still overflow once
-        // the response is written, and compacting is the only way to make room.
-        if (measured.TotalWithReserve < DirectCompactionPlanner.ResolveThreshold(setup.CompressionPolicy, setup.Budget))
+        if (PlanInTurn(setup, context, allowance, measured, observedInputTokens) is { } plan)
         {
-            return;
-        }
+            var result = await SummarizeAsync(
+                new DirectCompressionRequest(
+                    plan.PrefixUnits,
+                    // Already the bare summary: the compressor wraps it as the previous summary itself.
+                    context.InTurnSummary,
+                    plan.SourceTokens ?? measured.PromptTokens,
+                    setup.CompressionPolicy.ModelProfileId,
+                    setup.ProviderLease,
+                    setup.ConversationId,
+                    setup.TurnId),
+                measured.PromptTokens, plan.ThresholdTokens, writer, cancellationToken).ConfigureAwait(false);
+            allowance.RecordAttempt();
+            if (result is not null)
+            {
+                measured = ApplyInTurnCompaction(setup, context, plan, result, writer) ?? measured;
+            }
 
-        if (_meter.CountUnits(context.BuildUnits(), setup.ProviderLease.Profile) is not { } units)
-        {
-            return;
-        }
-
-        // No provider measurement is passed here: the last request's input predates the response and the tool
-        // results appended since, and it describes a prompt that no longer exists once a summary was applied.
-        var plan = DirectCompactionPlanner.PlanCompression(units, existing: null, setup.CompressionPolicy, setup.Budget,
-            measured.PromptTokens);
-        if (!plan.ShouldCompress)
-        {
-            return;
-        }
-
-        // Started precedes the summarization call, exactly like the turn-start path, so the transcript never
-        // sees a lone terminal event for this checkpoint.
-        writer.TryWrite(new ContextCompactionStartedEvent(measured.PromptTokens, plan.ThresholdTokens));
-        writer.TryWrite(new RunStatusEvent(AgentRunStatus.Compacting));
-        var result = await SummarizeAsync(
-            setup.ConversationId, setup.TurnId, setup.CompressionPolicy, setup.ProviderLease, plan,
-            // Already the bare summary: the compressor wraps it as the previous summary itself.
-            context.InTurnSummary, measured.PromptTokens, cancellationToken).ConfigureAwait(false);
-        allowance.RecordAttempt();
-        if (result is null)
-        {
-            writer.TryWrite(new ContextCompactionFailedEvent(CompactionFailedReason));
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
-            return;
         }
 
-        ApplyInTurnCompaction(setup, context, writer, plan, result);
+        EnsureInTurnPromptFitsWindow(setup.Budget, measured, allowance.IsExhausted);
     }
 
     /// <summary>
@@ -204,45 +207,6 @@ internal sealed class DirectCompactionStep
             "a larger context window.");
     }
 
-    /// <summary>
-    /// Refuses an in-turn prompt that cannot fit, because sending it would come back as an opaque provider
-    /// error. Runs before every request of the turn, not only after a summary: once the allowance is spent
-    /// nothing shrinks the prompt any more, and the turn must say so itself.
-    /// </summary>
-    internal void EnsureInTurnPromptFitsWindow(
-        DirectTurnSetup setup,
-        DirectConversationContext context,
-        bool compactionExhausted)
-    {
-        ArgumentNullException.ThrowIfNull(setup);
-        ArgumentNullException.ThrowIfNull(context);
-        // Ordered before counting: with no declared window there is nothing to compare against, so a model
-        // that never declared one must not pay for a count here.
-        if (setup.Budget.ContextWindowTokens is not int contextWindow)
-        {
-            return;
-        }
-
-        if (MeasureContext(setup, context) is not { } measured)
-        {
-            return;
-        }
-
-        if (measured.TotalWithReserve <= contextWindow)
-        {
-            return;
-        }
-
-        var remedy = compactionExhausted
-            ? $"The turn used all {MaximumInTurnCompactionsPerTurn} of its in-turn compactions and still does not fit."
-            : "Context compaction could not free enough room.";
-        throw new InvalidDataException(
-            "The conversation has outgrown the model context window: the remaining history, tool definitions " +
-            $"and output reserve require approximately {measured.TotalWithReserve} tokens, exceeding the window of " +
-            $"{contextWindow} tokens. {remedy} Lower the output limit, raise the compaction allowance, or use a " +
-            "model with a larger context window.");
-    }
-
     // The only place the snapshot rule lives: a plan is worth a section exactly when the boundary this request
     // replays against already swallowed the message that carried it.
     internal static string? TodoSection(TodoPlanSnapshot? plan, ConversationCompactionRecord? compression)
@@ -250,26 +214,27 @@ internal sealed class DirectCompactionStep
             ? TodoPlanSection.Build(snapshot.Plan)
             : null;
 
-    /// <summary>
-    /// Counts the prompt the turn-start path will build against <paramref name="boundary"/>. The section is the
-    /// one compaction already counted, so the request that is sized and the request that is sent can never
-    /// disagree about it.
-    /// </summary>
-    private DirectCountedPrompt? CountTurnStart(
+    // The prompt the turn would send against this boundary, not yet counted.
+    private static DirectTurnStartCompaction DescribePrompt(
         DirectTurnCompaction input,
-        ConversationCompactionRecord? boundary,
-        string? todoSection)
-        => _meter.CountTurnStartPrompt(
+        ConversationCompactionRecord? boundary)
+        => new(
+            boundary,
+            Counted: null,
             DirectSystemPrompt.BuildSystemText(
                 input.Request.Agent.Instructions,
                 input.CapabilityLease.SystemInstructions,
                 input.Request.ExecutionContext,
-                boundary,
-                todoSection),
+                boundary),
+            TodoSection(input.PlanSnapshot, boundary));
+
+    private DirectCountedPrompt? CountTurnStart(DirectTurnCompaction input, DirectTurnStartCompaction prompt)
+        => _meter.CountTurnStartPrompt(
+            DirectSystemPrompt.JoinSections(prompt.SystemText, prompt.TodoSection),
             input.ProviderLease.Options.Tools,
             input.ProviderLease.Profile,
             input.Units,
-            boundary?.ThroughSequence ?? 0,
+            prompt.Compression?.ThroughSequence ?? 0,
             DirectCompactionPlanner.ResolveOutputReserve(input.Budget.MaxOutputTokens));
 
     private DirectPromptMeasurement? MeasureContext(DirectTurnSetup setup, DirectConversationContext context)
@@ -277,7 +242,7 @@ internal sealed class DirectCompactionStep
             context,
             setup.ProviderLease.Options.Tools,
             setup.ProviderLease.Profile,
-            DirectCompactionPlanner.ResolveOutputReserve(setup.ProviderLease.Options.MaxOutputTokens));
+            DirectCompactionPlanner.ResolveOutputReserve(setup.Budget.MaxOutputTokens));
 
     // The provider's own measurement of the context this turn starts from: the input of the last request the
     // preceding turn made, which is also the context size the transcript displays. Only the immediately
@@ -294,70 +259,111 @@ internal sealed class DirectCompactionStep
             : null;
     }
 
-    private Task<DirectCompressionResult?> SummarizeAsync(
-        Guid conversationId,
-        Guid turnId,
-        DirectCompressionPolicy policy,
-        AiChatClientLease lease,
-        DirectCompressionPlan plan,
-        string? previousSummary,
-        int promptTokens,
-        CancellationToken cancellationToken)
-        => _compressor.TryCompressAsync(
-            new DirectCompressionRequest(
-                plan.PrefixUnits,
-                previousSummary,
-                plan.SourceTokens ?? promptTokens,
-                policy.ModelProfileId,
-                lease,
-                conversationId,
-                turnId),
-            cancellationToken);
-
-    private static ConversationCompactionRecord CreateRecord(
-        DirectChatTurnRequest request,
-        DirectCompressionPlan plan,
-        DirectCompressionResult result)
-        => new(
-            Guid.NewGuid(),
-            request.ConversationId,
-            request.TurnId,
-            plan.ThroughSequence,
-            result.Summary,
-            result.Model,
-            result.SourceMessageCount,
-            result.SourceTokens,
-            result.SummaryTokens,
-            DateTimeOffset.UtcNow);
-
-    private void ApplyInTurnCompaction(
+    // Null means "send this request uncompacted".
+    private DirectCompressionPlan? PlanInTurn(
         DirectTurnSetup setup,
         DirectConversationContext context,
-        ChannelWriter<AgentStreamEvent> writer,
-        DirectCompressionPlan plan,
-        DirectCompressionResult result)
+        InTurnCompactionAllowance allowance,
+        DirectPromptMeasurement measured,
+        int? observedInputTokens)
     {
-        // The bare summary goes in: the context owns the system-section shell, so a second compaction reuses
-        // one format instead of nesting wrapped summaries.
-        context.ApplyInTurnCompaction(result.Summary, plan.PrefixUnits.Count);
+        if (!setup.CompressionPolicy.Enabled || allowance.IsExhausted)
+        {
+            return null;
+        }
+
+        // The planner makes the same comparison; it is repeated here only because sizing every unit is the
+        // expensive part and almost every round is below the threshold.
+        var threshold = DirectCompactionPlanner.ResolveThreshold(setup.CompressionPolicy, setup.Budget);
+        if (Math.Max(measured.TotalWithReserve, observedInputTokens ?? 0) < threshold)
+        {
+            return null;
+        }
+
+        if (_meter.CountUnits(context.BuildUnits(), setup.ProviderLease.Profile) is not { } units)
+        {
+            return null;
+        }
+
+        var plan = DirectCompactionPlanner.PlanCompression(
+            units, existing: null, setup.CompressionPolicy, setup.Budget, measured.PromptTokens, observedInputTokens);
+        return plan.ShouldCompress ? plan : null;
+    }
+
+    /// <summary>
+    /// The summarization both paths share, with the events around it. Started is written before the call so the
+    /// transcript never sees a lone terminal, and its token count stays reserve-free to match the context-size
+    /// readout (design §8.1). Null means the summary failed and the Failed event is already written; the caller
+    /// publishes its own Completed event because the two paths complete with different records.
+    /// </summary>
+    private async Task<DirectCompressionResult?> SummarizeAsync(
+        DirectCompressionRequest request,
+        int promptTokens,
+        int thresholdTokens,
+        ChannelWriter<AgentStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        writer.TryWrite(new ContextCompactionStartedEvent(promptTokens, thresholdTokens));
+        writer.TryWrite(new RunStatusEvent(AgentRunStatus.Compacting));
+        var result = await _compressor.TryCompressAsync(request, cancellationToken).ConfigureAwait(false);
+        if (result is null)
+        {
+            writer.TryWrite(new ContextCompactionFailedEvent(CompactionFailedReason));
+            return null;
+        }
+
         if (result.UsedFallbackModel)
         {
             writer.TryWrite(new RunStatusEvent(AgentRunStatus.Compacting, CompactionFallbackDiagnostic));
         }
 
+        return result;
+    }
+
+    // Returns the measurement of the compacted context, which is also what the meter is told: the context
+    // figure drops here instead of staying at the pre-compaction size until the next provider observation.
+    private DirectPromptMeasurement? ApplyInTurnCompaction(
+        DirectTurnSetup setup,
+        DirectConversationContext context,
+        DirectCompressionPlan plan,
+        DirectCompressionResult result,
+        ChannelWriter<AgentStreamEvent> writer)
+    {
+        // The bare summary goes in: the context owns the system-section shell, so a second compaction reuses
+        // one format instead of nesting wrapped summaries.
+        context.ApplyInTurnCompaction(result.Summary, plan.PrefixUnits.Count);
         writer.TryWrite(new InTurnContextCompactionCompletedEvent(
             plan.PrefixUnits.Count,
             result.SourceTokens,
             result.SummaryTokens,
             result.Model));
-        // The meter follows the compaction immediately: the published count is the compacted prompt, so the
-        // context figure drops here instead of staying at the pre-compaction size until the next observation.
-        if (MeasureContext(setup, context) is { } measured)
+        var compacted = MeasureContext(setup, context);
+        if (compacted is not null)
         {
             writer.TryWrite(DirectEventTranslator.CreateContextEstimate(
-                measured.PromptTokens, setup.Budget.ContextWindowTokens));
+                compacted.PromptTokens, setup.Budget.ContextWindowTokens));
         }
 
-        writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
+        return compacted;
+    }
+
+    private static void EnsureInTurnPromptFitsWindow(
+        DirectPromptBudget budget,
+        DirectPromptMeasurement measured,
+        bool compactionExhausted)
+    {
+        if (budget.ContextWindowTokens is not int contextWindow || measured.TotalWithReserve <= contextWindow)
+        {
+            return;
+        }
+
+        var remedy = compactionExhausted
+            ? $"The turn used all {MaximumInTurnCompactionsPerTurn} of its in-turn compactions and still does not fit."
+            : "Context compaction could not free enough room.";
+        throw new InvalidDataException(
+            "The conversation has outgrown the model context window: the remaining history, tool definitions " +
+            $"and output reserve require approximately {measured.TotalWithReserve} tokens, exceeding the window of " +
+            $"{contextWindow} tokens. {remedy} Lower the output limit, raise the compaction allowance, or use a " +
+            "model with a larger context window.");
     }
 }

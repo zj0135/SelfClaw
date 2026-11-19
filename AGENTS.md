@@ -40,7 +40,7 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 3. 非为继承设计的类一律 `sealed`；DI 注册的内部类型用 `internal sealed`；依赖以 private `_camelCase` 字段构造注入，字段列在构造函数之前；类内顺序：字段 → 构造 → 主公开方法 → 私有辅助。`internal` 构造函数的服务在 `ServiceCollectionExtensions` 必须用工厂 lambda 注册：`AddSingleton<T>()` 的约定解析看不到 `internal` 构造函数。
 4. 公开方法超 40–50 行即拆分；无状态辅助用 `private static`。
 5. 异步方法一律 `Async` 后缀；公开名不用缩写（`Conversation` 而非 `Conv`）。
-6. Infrastructure 全量 `ConfigureAwait(false)`，Desktop ViewModel 不加；`OperationCanceledException` 必须重抛、绝不转成失败结果；流式用 `IAsyncEnumerable<T>` + `Channel<T>`。
+6. Infrastructure 全量 `ConfigureAwait(false)`，Desktop ViewModel 不加；回合/调用方自己的 token 触发的 `OperationCanceledException` 必须重抛、绝不转成失败结果，取消分支一律写 `when (cancellationToken.IsCancellationRequested)`——token 仍有效时冒出来的取消异常（SDK/HTTP 超时、对端断开）是失败，按失败处理，不得伪装成用户取消；流式用 `IAsyncEnumerable<T>` + `Channel<T>`。
 7. 启用 NRT；公开方法用 `ArgumentNullException.ThrowIfNull`；除编译器不可追踪的可证明空检查外禁用 `!`。
 8. 优先朴素控制流（`if` / `return` / `switch`）；不为单一调用方造泛型包装或基类；只被调用一次的 3 行辅助函数应内联。
 9. 注释只写 why；不加显而易见的注释；私有成员与平凡属性不加 XML 文档注释。

@@ -1,7 +1,10 @@
 using SelfClaw.Infrastructure.AiProviders.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
+using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
 using FluentAssertions;
+using Microsoft.Extensions.AI;
+using SelfClaw.Core.Runtime.Agent;
 using ModelContextProtocol;
 using ModelContextProtocol.Client;
 using ModelContextProtocol.Protocol;
@@ -126,9 +129,50 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         lease.Tools.Select(tool => tool.Name).Should().Equal(
             "todo_write", "activate_skill", "read_skill_resource", "run_skill_script", "list_skill_resources");
         lease.Diagnostics.Should().ContainSingle(item => item.Contains("activated Skill 'review'"));
-        lease.MessageAdjustments[request.Messages[0].Id].Should().Be("history  [/unknown]");
+        lease.MessageAdjustments.Should().NotContainKey(request.Messages[0].Id,
+            "an earlier message keeps its marker: it is the only trace that the user asked for the Skill then");
         lease.MessageAdjustments[request.Messages[1].Id].Should().Be("run  and ");
         request.Messages[1].MarkdownContent.Should().Be("run [/review] and [/review]");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task A_skill_activated_in_an_earlier_turn_stays_usable_while_its_activation_is_replayed(
+        bool coveredByCompaction)
+    {
+        var review = await CreatePackageAsync("review", enabled: true);
+        var resolver = CreateResolver(new PackageRepository([review]));
+        var request = CreateRequest(["review"], "continue", "use the review skill");
+        var now = DateTimeOffset.UtcNow;
+        var earlier = request.Messages[0];
+        var activation = new MessageRecord(
+            Guid.NewGuid(), request.ConversationId, earlier.TurnId, 2, MessageRole.Assistant, "activated",
+            MessageStatus.Sealed, now, now);
+        IReadOnlyList<MessageRecord> messages = [earlier, activation, request.Messages[1] with { Sequence = 3 }];
+        request = request with
+        {
+            Messages = messages,
+            Turns = PresentationHistory.Turns(messages),
+            ToolExecutions =
+            [
+                new ToolExecutionRecord(Guid.NewGuid(), request.ConversationId, SkillRuntimeToolset.ActivateSkillToolName,
+                    "{\"skillId\":\"review\"}", ToolExecutionStatus.Completed, "Activated Skill 'review'.", "call-1", null,
+                    now, now, MessageId: activation.Id)
+            ],
+            Compression = coveredByCompaction
+                ? new ConversationCompactionRecord(Guid.NewGuid(), request.ConversationId, earlier.TurnId, 2,
+                    "summary", "model", 2, 10, 5, now)
+                : null
+        };
+
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
+        var list = (AIFunction)lease.Tools.Single(tool => tool.Name == SkillRuntimeToolset.ListSkillResourcesToolName);
+        var result = (await list.InvokeAsync(new AIFunctionArguments { ["skillId"] = "review" }))
+            .Should().BeOfType<DirectToolResult>().Subject;
+
+        // The model can read the Skill body in its history exactly as long as the activation is replayed.
+        result.Status.Should().Be(coveredByCompaction ? ToolCallStatus.Failed : ToolCallStatus.Completed);
     }
 
     [Fact]

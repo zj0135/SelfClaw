@@ -223,6 +223,20 @@ public sealed class DirectTokenCounterTests
     }
 
     [Fact]
+    public void Reasoning_an_in_turn_response_replays_is_counted()
+    {
+        var counter = new DirectTokenCounter(tokenizerFactory: new RecordingTokenizerFactory().Create);
+        var answer = new ChatMessage(ChatRole.Assistant, [new TextContent("hello")]);
+        var withReasoning = new ChatMessage(ChatRole.Assistant,
+            [new TextReasoningContent("thinking it over") { ProtectedData = "signature" }, new TextContent("hello")]);
+
+        // The reasoning goes back to the provider with the tool results, so leaving it out would let a long
+        // tool turn look smaller than the request it actually sends.
+        counter.CountMessages([withReasoning], O200kModel).Should().Be(
+            counter.CountMessages([answer], O200kModel) + "thinking it over".Length);
+    }
+
+    [Fact]
     public void Message_counts_are_cached_per_message_id_and_content()
     {
         var factory = new RecordingTokenizerFactory();

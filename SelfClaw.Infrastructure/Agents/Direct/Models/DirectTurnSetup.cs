@@ -32,7 +32,7 @@ internal sealed record DirectTurnSetup(
     /// </summary>
     ToolImageDelivery ImageDelivery = ToolImageDelivery.Unsupported,
     /// <summary>
-    /// The plan section this turn already injected into <see cref="SystemText"/>, so an in-turn compaction that
-    /// covers the same plan does not pay for it twice. Null when the turn start injected none.
+    /// The plan section the turn starts with. It is kept apart from <see cref="SystemText"/> because it is the
+    /// one section an in-turn compaction may replace or drop. Null when the turn start injected none.
     /// </summary>
-    string? TurnStartPlanSection = null);
+    string? PlanSection = null);

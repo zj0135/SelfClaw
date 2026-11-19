@@ -16,6 +16,9 @@ internal sealed class McpToolAdapter
 {
     internal const int MaximumProviderNameLength = 64;
 
+    /// <summary>Matches the longest allowance any built-in tool has: a Skill script may run for 600 seconds.</summary>
+    internal static readonly TimeSpan MaximumCallDuration = TimeSpan.FromMinutes(10);
+
     public DirectToolBinding Create(
         McpClientTool tool,
         ResolvedMcpServerConfiguration configuration)
@@ -52,8 +55,21 @@ internal sealed class McpToolAdapter
     {
         protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
         {
-            var result = await InnerFunction.InvokeAsync(arguments, cancellationToken).ConfigureAwait(false);
-            return McpToolResultFormatter.Format(result);
+            // An MCP server is third-party code with no progress signal: without a ceiling a server that never
+            // answers would hold a background turn forever.
+            using var ceiling = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            ceiling.CancelAfter(MaximumCallDuration);
+            try
+            {
+                var result = await InnerFunction.InvokeAsync(arguments, ceiling.Token).ConfigureAwait(false);
+                return McpToolResultFormatter.Format(result);
+            }
+            catch (OperationCanceledException) when (
+                ceiling.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                throw new TimeoutException(
+                    $"The MCP tool did not answer within {MaximumCallDuration.TotalSeconds:0} seconds.");
+            }
         }
     }
 

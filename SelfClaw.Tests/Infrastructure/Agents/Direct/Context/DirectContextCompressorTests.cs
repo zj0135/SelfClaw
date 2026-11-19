@@ -220,18 +220,31 @@ public sealed class DirectContextCompressorTests
     [Fact]
     public async Task Rethrows_cancellation()
     {
+        using var stop = new CancellationTokenSource();
         var client = new RecordingChatClient((_, _, cancellationToken) =>
         {
-            var source = new CancellationTokenSource();
-            source.Cancel();
-            return Task.FromCanceled<ChatResponse>(source.Token);
+            stop.Cancel();
+            return Task.FromCanceled<ChatResponse>(stop.Token);
         });
 
         var action = () => CreateCompressor(client).TryCompressAsync(Request(
             [Unit(new ChatMessage(ChatRole.User, "hello"))],
-            turnLease: CreateLease(client, "turn-model")));
+            turnLease: CreateLease(client, "turn-model")), stop.Token);
 
         await action.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    [Fact]
+    public async Task A_cancellation_the_turn_did_not_ask_for_degrades_like_any_failed_summary()
+    {
+        var client = new RecordingChatClient((_, _, _) =>
+            Task.FromException<ChatResponse>(new TaskCanceledException("the summary request timed out")));
+
+        var result = await CreateCompressor(client).TryCompressAsync(Request(
+            [Unit(new ChatMessage(ChatRole.User, "hello"))],
+            turnLease: CreateLease(client, "turn-model")));
+
+        result.Should().BeNull("only the turn's own token may cancel the turn");
     }
 
     [Fact]

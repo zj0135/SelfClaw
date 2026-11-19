@@ -198,9 +198,11 @@ public sealed class DirectCompactionRuntimeTests
     [Fact]
     public async Task Cancelling_the_summary_propagates_without_a_failure_event()
     {
+        using var stop = new CancellationTokenSource();
         var client = new TurnClient([[Finish("m1", ChatFinishReason.Stop, new TextContent("done"))]])
         {
-            ResponseException = new OperationCanceledException()
+            ResponseException = new OperationCanceledException(),
+            BeforeResponseException = stop.Cancel
         };
         var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client)
         {
@@ -211,7 +213,7 @@ public sealed class DirectCompactionRuntimeTests
 
         var action = async () =>
         {
-            await foreach (var item in runtime.StreamTurnAsync(CreateRequest(factory)))
+            await foreach (var item in runtime.StreamTurnAsync(CreateRequest(factory), stop.Token))
             {
                 seen.Add(item);
             }
@@ -478,6 +480,9 @@ public sealed class DirectCompactionRuntimeTests
 
         internal Exception? ResponseException { get; init; }
 
+        /// <summary>Lets a test cancel the turn's own token at the moment the summary call fails.</summary>
+        internal Action? BeforeResponseException { get; init; }
+
         internal List<IReadOnlyList<ChatMessage>> Invocations { get; } = [];
         internal List<IReadOnlyList<ChatMessage>> SummaryCalls { get; } = [];
 
@@ -498,6 +503,7 @@ public sealed class DirectCompactionRuntimeTests
                 SummaryCalls.Add(captured);
                 if (ResponseException is not null)
                 {
+                    BeforeResponseException?.Invoke();
                     throw ResponseException;
                 }
 

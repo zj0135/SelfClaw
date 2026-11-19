@@ -24,28 +24,22 @@ public sealed class TodoPlanSectionTests
     private const string Heading = "[SelfClaw Plan]";
 
     [Fact]
-    public void A_turn_without_compaction_keeps_the_old_system_text_byte_for_byte()
+    public void A_turn_without_a_plan_keeps_its_system_text_byte_for_byte()
     {
-        var systemInstructions = new[] { "capability instructions" };
+        var systemText = DirectSystemPrompt.BuildSystemText(
+            AgentInstructions, ["capability instructions"], Interactive(), compression: null);
 
-        var withoutPlan = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(), compression: null);
-        var withExplicitNull = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(),
-            compression: null, todoSection: null);
+        var context = new DirectConversationContext(systemText, [TextUnit(1, "history")], [], planSection: null);
 
-        withExplicitNull.Should().Be(withoutPlan);
-        withExplicitNull.Should().NotContain(Heading);
+        context.Messages[0].Text.Should().Be(systemText);
+        context.Messages[0].Text.Should().NotContain(Heading);
     }
 
     [Fact]
     public void A_blank_section_leaves_no_separator_behind()
     {
-        var systemInstructions = new[] { "capability instructions" };
-
-        var withoutSection = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(), compression: null);
-        var withBlankSection = DirectSystemPrompt.BuildSystemText(AgentInstructions, systemInstructions, Interactive(),
-            compression: null, todoSection: "  \n ");
-
-        withBlankSection.Should().Be(withoutSection);
+        DirectSystemPrompt.JoinSections(AgentInstructions, "  \n ", null).Should().Be(AgentInstructions);
+        DirectSystemPrompt.JoinSections(null, " ").Should().BeNull();
     }
 
     [Fact]
@@ -132,22 +126,23 @@ public sealed class TodoPlanSectionTests
     }
 
     [Fact]
-    public void The_section_sits_between_the_summary_and_the_capability_sections()
+    public void The_section_follows_every_section_the_turn_started_with()
     {
+        // The plan is the one section that can change mid-turn, so it goes last: replacing it never rewrites
+        // the summary or the capability sections in front of it.
         var systemText = DirectSystemPrompt.BuildSystemText(
             AgentInstructions,
             ["first capability", "second capability"],
             Interactive(),
-            CreateCompaction(throughSequence: 3),
-            TodoPlanSection.Build(SamplePlan()));
+            CreateCompaction(throughSequence: 3));
+        var context = new DirectConversationContext(systemText, [], [], TodoPlanSection.Build(SamplePlan()));
 
-        Assert.NotNull(systemText);
-        var summaryIndex = systemText.IndexOf("<selfclaw-context-summary", StringComparison.Ordinal);
-        var planIndex = systemText.IndexOf(Heading, StringComparison.Ordinal);
-        var capabilityIndex = systemText.IndexOf("first capability", StringComparison.Ordinal);
-        summaryIndex.Should().BePositive();
-        planIndex.Should().BeGreaterThan(summaryIndex);
-        capabilityIndex.Should().BeGreaterThan(planIndex);
+        var text = context.Messages[0].Text ?? string.Empty;
+        text.Should().StartWith(systemText);
+        text.IndexOf(Heading, StringComparison.Ordinal).Should().BeGreaterThan(
+            text.IndexOf("second capability", StringComparison.Ordinal));
+        text.Should().Be(DirectSystemPrompt.JoinSections(systemText, TodoPlanSection.Build(SamplePlan())),
+            "the turn start counts exactly this text");
     }
 
     [Fact]
@@ -199,19 +194,56 @@ public sealed class TodoPlanSectionTests
     }
 
     [Fact]
-    public void An_in_turn_snapshot_already_in_the_turn_start_system_text_is_not_repeated()
+    public void An_in_turn_snapshot_equal_to_the_turn_start_one_is_not_repeated()
     {
-        var planSection = TodoPlanSection.Build(SamplePlan());
-        var systemText = DirectSystemPrompt.BuildSystemText(
-            AgentInstructions, [], Interactive(), CreateCompaction(throughSequence: 1), planSection);
-        var context = new DirectConversationContext(systemText, [SamePlanUnit(2)], [], planSection);
+        var context = new DirectConversationContext(
+            TurnStartSystemText(), [SamePlanUnit(2)], [], TodoPlanSection.Build(SamplePlan()));
 
         context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
 
         var text = context.Messages[0].Text ?? string.Empty;
-        text.Should().Contain("<selfclaw-context-summary");
-        text.Should().Contain(Heading);
+        text.Should().Contain("in-turn summary");
         text.Split(Heading).Should().HaveCount(2, "the same snapshot must not be paid for twice");
+    }
+
+    [Fact]
+    public void A_newer_plan_covered_in_turn_replaces_the_turn_start_snapshot()
+    {
+        var context = new DirectConversationContext(
+            TurnStartSystemText(), [TodoUnit(2)], [], TodoPlanSection.Build(SamplePlan()));
+
+        context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
+
+        var text = context.Messages[0].Text ?? string.Empty;
+        text.Split(Heading).Should().HaveCount(2, "two snapshots would leave the model guessing which is current");
+        text.Should().NotContain("检查 Direct 工具装配", "the turn-start snapshot was superseded");
+        text.Should().Contain("- [~] 新增 todo_write 工具");
+    }
+
+    [Fact]
+    public void A_finished_plan_covered_in_turn_removes_the_older_snapshot()
+    {
+        var context = new DirectConversationContext(
+            TurnStartSystemText(), [FinishedPlanUnit(2), TextUnit(3, "newest")], [],
+            TodoPlanSection.Build(SamplePlan()));
+
+        context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
+
+        (context.Messages[0].Text ?? string.Empty).Should().NotContain(Heading,
+            "the newest plan is done and no todo_write is left in the history to supersede the old snapshot");
+    }
+
+    [Fact]
+    public void A_newer_plan_still_in_the_history_leaves_the_turn_start_snapshot_alone()
+    {
+        var planSection = TodoPlanSection.Build(SamplePlan());
+        var context = new DirectConversationContext(
+            TurnStartSystemText(), [TextUnit(2, "oldest"), FinishedPlanUnit(3)], [], planSection);
+
+        context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
+
+        (context.Messages[0].Text ?? string.Empty).Should().EndWith(planSection,
+            "the newer todo_write still replays and supersedes the snapshot by itself");
     }
 
     [Fact]
@@ -263,6 +295,12 @@ public sealed class TodoPlanSectionTests
         => new([TodoCall(PlanArguments(
             ("检查 Direct 工具装配", "completed"),
             ("新增 todo_write 工具", "in_progress")))], sequence);
+
+    private static DirectPromptHistoryUnit FinishedPlanUnit(long sequence)
+        => new([TodoCall(PlanArguments(("新增 todo_write 工具", "completed")))], sequence);
+
+    private static string? TurnStartSystemText()
+        => DirectSystemPrompt.BuildSystemText(AgentInstructions, [], Interactive(), CreateCompaction(throughSequence: 1));
 
     private static DirectPromptHistoryUnit TextUnit(long sequence, string text)
         => new([new ChatMessage(ChatRole.Assistant, text)], sequence);

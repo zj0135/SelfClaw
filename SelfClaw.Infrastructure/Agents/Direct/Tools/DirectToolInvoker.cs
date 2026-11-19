@@ -140,7 +140,10 @@ internal sealed class DirectToolInvoker
                 ?? throw new InvalidOperationException(
                     $"Tool '{binding.Tool.Name}' returned an invalid result."));
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        // A cancellation the turn did not ask for (a tool's own timeout, a dropped MCP connection) is a tool
+        // fault like any other; only the turn's token may cancel the turn.
+        catch (Exception exception) when (
+            exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
         {
             // A faulting tool is a failure the model must see, not a turn failure: the real error
             // reaches it as a result, so the model can correct itself. Detail carries the message
@@ -235,9 +238,12 @@ internal sealed class DirectToolInvoker
                 return await approval.ConfigureAwait(false);
             }
 
-            if (await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false))
+            // TryBeginToolExecutionAsync is the claim attempt itself: it answers false exactly when a steer
+            // batch is now durably claimed. Without a claim nothing may be revoked on behalf of an input that
+            // was only announced, so the approval keeps waiting.
+            var steerClaimed = !await _steering.TryBeginToolExecutionAsync(cancellationToken).ConfigureAwait(false);
+            if (!steerClaimed)
             {
-                // The claim failed, so nothing may be revoked on behalf of an unconfirmed input.
                 continue;
             }
 

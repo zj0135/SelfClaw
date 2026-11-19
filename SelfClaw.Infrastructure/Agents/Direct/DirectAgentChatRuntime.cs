@@ -7,7 +7,6 @@ using SelfClaw.Core.Runtime;
 using SelfClaw.Core.Runtime.Agent;
 using SelfClaw.Infrastructure.Agents.Direct.Models;
 using SelfClaw.Infrastructure.Agents.Runtime.Abstractions;
-using SelfClaw.Infrastructure.AiProviders;
 
 namespace SelfClaw.Infrastructure.Agents.Direct;
 
@@ -34,6 +33,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
     private const string TruncatedWithoutOutputMessage =
         "The response reached the configured output-token limit without producing any output. " +
         "Raise the output-token limit for this model and try again.";
+
+    internal const string ExternalCancellationMessage =
+        "The request was cancelled by the provider or a tool, not by the user.";
 
     private readonly DirectTurnPreparer _turnPreparer;
     private readonly DirectTurnRunFactory _turnRuns;
@@ -106,12 +108,15 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             output.ConfigureUsage(
                 setup.ProviderLease.Profile.Configuration,
                 setup.ProviderLease.Profile.Model,
-                AiChatOptions.ResolveContextWindowTokens(setup.ProviderLease.Profile));
+                setup.Budget.ContextWindowTokens);
             var outcome = await _turnRuns.Create(setup, output).RunAsync(cancellationToken).ConfigureAwait(false);
             output.ReportUsage();
             WriteTerminalOutcome(writer, outcome, output);
         }
-        catch (OperationCanceledException exception)
+        // Only the turn's own token means the user stopped it. A cancellation that surfaces while that token
+        // is still live came from a provider, an SDK timeout or a tool; reporting it as "stopped by the user"
+        // would hide a failure, so it takes the failure path below.
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
         {
             output.ReportUsage();
             writer.TryComplete(exception);
@@ -124,7 +129,9 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
             writer.TryWrite(new RunCompletedEvent(
                 RunCompletionStatus.Failed,
                 output.FinalTextOrNull,
-                exception.Message));
+                exception is OperationCanceledException
+                    ? $"{ExternalCancellationMessage} ({exception.Message})"
+                    : exception.Message));
         }
         finally
         {

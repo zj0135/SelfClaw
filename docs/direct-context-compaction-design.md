@@ -206,7 +206,7 @@ triggerTokens = max(promptTokens + outputReserve, observed ?? 0)           // �
 - 取两者较大值：tokenizer 受编码匹配度影响，实测值受“上一次请求内容与本次不同”影响；取大更保守，宁可早压不可超窗。本地计数对图片只计一个常数（`PerImageTokens`），实测下限正是它偏低时的校正：界面读数（实测）过了阈值，下一回合就压缩。
 - `observed` 只取**紧邻的上一回合**，且该回合必须是 Direct 回合：它是那一回合最后一次 provider 请求的输入规模，也就是界面显示的上下文大小。**不向更早的回合回溯**：更早的实测值可能早于现有压缩边界，会让已经压过的会话再压一次。上一回合没有上报（未发出请求即失败）或是 CLI 回合（它实测的是 CLI 自己的会话，不是 Direct 重放的 prompt）时没有下限，判定只看本地计数。数据来自请求已携带的 `Turns`，不新增 SQL。
 - `observed` 只决定“要不要压”，不决定“压多少”：前缀与保留仍按本地单元计数切分（§5.6）。实测值可能高于本回合真实 prompt（上一回合最后一次请求里有不再重放的内容），此时若全部单元都落在保留目标内，规划直接拒绝，不产生模型调用。`ContextCompactionStartedEvent.EstimatedTokens` 也仍是本地计数（§8.1）。
-- 回合内检查点不使用 `observed`（`direct-in-turn-compaction-design.md` §3.2）：回合内上一次请求的输入不含其后追加的响应与工具结果，压缩之后更是描述一个已不存在的 prompt。
+- 回合内检查点也有自己的实测下限，但来源不同（`direct-in-turn-compaction-design.md` §3.2）：它用的是**本回合上一次请求**的实测输入，不是这里的 `observed`（上一回合的最后一次请求）。
 - `policy.Enabled == false` → 不压缩、不裁剪；`promptTokens + outputReserve > window` 时抛可读错误（`InvalidDataException`）：说明历史超出模型窗口、提示开启压缩或换更大窗口的模型。
 - 压缩后重算：**必须把新的 system 段（含摘要 section）算进去**，若仍 `promptTokens + outputReserve > window` → 抛同类错误（压缩没能解决，不静默发送超限请求）。
 
@@ -305,6 +305,7 @@ internal static string? BuildSystemText(..., ConversationCompactionRecord? compr
 - **保留的必要校验**：`counted(system + tools) + outputReserve > window` → 抛既有可读错误（这条与用户历史无关，属于配置错误）；计数不可用时跳过该检查（fail-open），由 provider 报错。⚠ 落地归属（C7 定）：这条检查的唯一归属是 **`DirectCompactionStep`**（`EnsureTurnStartPromptFitsWindow`，文案要带“开启压缩 / 降低输出上限 / 换更大窗口”的指引），composer **不再重复同一条校验**——`DirectTurnPreparer` 用同一份计数在 `Compose` 之前先跑，composer 里那份永远不可达，属重复实现（AGENTS 约定 10）。composer 只保留与计数无关的校验（completion batch 的 64 KiB 上限、历史顺序与归属校验）。
 - completion batch、steer 批次的语义与顺序不变。
 - **计数不再是 composer 的职责**：`EstimateTokens` 字节估算与其派生方法删除；`DirectTurnRun.FitsBudget` 改用 `DirectPromptMeter`（底层 `IDirectTokenCounter`）与增量维护的上下文计数。
+- **回合内响应的 reasoning 计入**：`DirectTokenCounter` 把 `TextReasoningContent.Text` 计入所在消息。落库历史重放不带 reasoning，所以这只影响回合内上下文——三种协议都会把本回合的 reasoning 随工具结果一起发回去，不计就会让长工具回合显得比实际发送的请求小。签名（`ProtectedData`）仍然不可计，由回合内的 provider 实测下限兜住（`direct-in-turn-compaction-design.md` §3.2）。
 - **计数的口径必须是 provider 收到的文本**（C18 修）：`DirectTokenCounter` 把 `FunctionCallContent.Arguments` / `FunctionResultContent.Result` / 工具 `AdditionalProperties` 序列化成 JSON 后计数，所以序列化器必须用 `JavaScriptEncoder.UnsafeRelaxedJsonEscaping`，且**字符串片段不序列化**（它本来就是 provider 收到的原文，序列化只会多一对引号）。用默认编码器时中文被写成 `\uXXXX`、`< > &` 被写成 `\u003C` 一类转义，实测把代码/中文密集的工具结果放大约 **1.6 倍**：状态栏在“回合开始估算 → 回合结束实测”之间来回跳，压缩也会提前触发（1M 窗口 0.75 阈值下真实约 480K 就压）。这条口径同时影响 `PlanCompression`、`FitsBudget` 与 `EnsureTurnStartPromptFitsWindow` / `EnsureInTurnPromptFitsWindow`，改错不只是显示问题。
 - **单元形状**：`DirectPromptHistoryUnit(Messages, SourceSequence, int? Tokens = null)`。一个单元 = 一条存储消息（工具调用与其结果同单元，边界只能落在单元之间），`Tokens` 由调用方计数后回填，`SourceTokens` = 前缀单元的计数之和。`PlanCompression` 之所以收“已计数的单元”而不是原始入参：保留比例与 `SourceTokens` 都需要每单元的计数，而“composer 不计数”这条约束必须保住。
 - **物化范围**：规划要知道前缀，所以 composer 会重建**全部**可重放单元（旧实现那种“只回看 replay 需要的工具记录”的懒索引随裁剪一起删除，这是有意的）。已有压缩项时，边界及更早的消息既不被重放也无需计数，可在建单元与计数时直接从边界之后开始；**首次**压缩仍需全量扫描。

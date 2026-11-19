@@ -15,6 +15,7 @@ internal sealed class SkillRuntimeToolset
     internal const string ReadSkillResourceToolName = "read_skill_resource";
     internal const string RunSkillScriptToolName = "run_skill_script";
     internal const string ListSkillResourcesToolName = "list_skill_resources";
+    private const string ActivatedSkillIdArgument = "skillId";
     private const int MaximumActivatedSkills = 5;
     private const int DefaultLineCount = 200;
     private const int MaximumLineCount = 500;
@@ -30,9 +31,15 @@ internal sealed class SkillRuntimeToolset
         _scriptRunner = scriptRunner;
     }
 
+    /// <param name="explicitlyActivatedSkillIds">Skills the user's message activated; their body is in the system prompt.</param>
+    /// <param name="restoredSkillIds">
+    /// Skills an earlier turn activated whose activate_skill result this request still replays. The model can
+    /// still read that body, so the tools treat them as activated instead of refusing what the history shows.
+    /// </param>
     public IReadOnlyList<DirectToolBinding> CreateTools(
         IReadOnlyList<ResolvedSkill> skills,
-        IReadOnlyList<string> explicitlyActivatedSkillIds)
+        IReadOnlyList<string> explicitlyActivatedSkillIds,
+        IReadOnlyList<string>? restoredSkillIds = null)
     {
         ArgumentNullException.ThrowIfNull(skills);
         ArgumentNullException.ThrowIfNull(explicitlyActivatedSkillIds);
@@ -41,7 +48,7 @@ internal sealed class SkillRuntimeToolset
             return [];
         }
 
-        var bound = new BoundSkillTools(skills, explicitlyActivatedSkillIds, _scriptRunner);
+        var bound = new BoundSkillTools(skills, explicitlyActivatedSkillIds, restoredSkillIds ?? [], _scriptRunner);
         return
         [
             DirectToolBindings.Create(
@@ -71,19 +78,46 @@ internal sealed class SkillRuntimeToolset
         ];
     }
 
+    /// <summary>
+    /// The Skill id a stored activate_skill call asked for, or null when its arguments cannot be read. It lives
+    /// beside the tool so the argument name is defined in one place.
+    /// </summary>
+    internal static string? ReadActivatedSkillId(string argumentsJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(argumentsJson);
+            return document.RootElement.ValueKind == JsonValueKind.Object &&
+                   document.RootElement.TryGetProperty(ActivatedSkillIdArgument, out var skillId) &&
+                   skillId.ValueKind == JsonValueKind.String
+                ? skillId.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private sealed class BoundSkillTools
     {
         private readonly IReadOnlyDictionary<string, ResolvedSkill> _skills;
         private readonly HashSet<string> _activatedSkillIds;
         private readonly SkillScriptRunner _scriptRunner;
+        private int _remainingActivations;
 
         public BoundSkillTools(
             IReadOnlyList<ResolvedSkill> skills,
             IReadOnlyList<string> explicitlyActivatedSkillIds,
+            IReadOnlyList<string> restoredSkillIds,
             SkillScriptRunner scriptRunner)
         {
             _skills = skills.ToDictionary(skill => skill.Id, StringComparer.OrdinalIgnoreCase);
-            _activatedSkillIds = explicitlyActivatedSkillIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _activatedSkillIds = explicitlyActivatedSkillIds.Concat(restoredSkillIds)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            // The limit bounds the Skill bodies this turn adds to the prompt. A restored Skill adds none: its
+            // body is already in the replayed history.
+            _remainingActivations = MaximumActivatedSkills - explicitlyActivatedSkillIds.Count;
             _scriptRunner = scriptRunner;
         }
 
@@ -105,11 +139,12 @@ internal sealed class SkillRuntimeToolset
                 return Task.FromResult(Loaded(alreadyActive, alreadyActive));
             }
 
-            if (_activatedSkillIds.Count >= MaximumActivatedSkills)
+            if (_remainingActivations <= 0)
             {
                 return Task.FromResult(Failed("This turn has reached the limit of 5 activated Skills."));
             }
 
+            _remainingActivations--;
             _activatedSkillIds.Add(skill.Id);
             return Task.FromResult(Loaded(
                 $"{skill.Content}\n\n{SkillResourceFormatter.Manifest(skill.Id, skill.Resources)}",
@@ -129,13 +164,25 @@ internal sealed class SkillRuntimeToolset
                 return failure;
             }
 
-            var filePath = SkillPathGuard.ResolveWithinRoot(skill.InstallPath, relativePath);
+            string filePath;
+            try
+            {
+                filePath = SkillPathGuard.ResolveWithinRoot(skill.InstallPath, relativePath);
+                if (File.Exists(filePath))
+                {
+                    SkillPathGuard.EnsureNoReparsePoints(skill.InstallPath, filePath);
+                }
+            }
+            catch (InvalidDataException rejection)
+            {
+                return PathRejected(rejection);
+            }
+
             if (!File.Exists(filePath))
             {
                 return Failed($"Skill resource '{relativePath}' was not found.");
             }
 
-            SkillPathGuard.EnsureNoReparsePoints(skill.InstallPath, filePath);
             var kind = SkillResourceIndexer.Classify(Path.GetExtension(filePath));
             if (kind is null)
             {
@@ -200,13 +247,22 @@ internal sealed class SkillRuntimeToolset
                 return failure;
             }
 
-            var result = await _scriptRunner.RunAsync(
-                    skill.InstallPath,
-                    relativePath,
-                    arguments,
-                    timeoutSeconds ?? SkillScriptRunner.DefaultTimeoutSeconds,
-                    cancellationToken)
-                .ConfigureAwait(false);
+            SkillScriptResult result;
+            try
+            {
+                result = await _scriptRunner.RunAsync(
+                        skill.InstallPath,
+                        relativePath,
+                        arguments,
+                        timeoutSeconds ?? SkillScriptRunner.DefaultTimeoutSeconds,
+                        cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (InvalidDataException rejection)
+            {
+                return PathRejected(rejection);
+            }
+
             return new DirectToolResult(
                 result.Executed && result.ExitCode == 0 ? ToolCallStatus.Completed : ToolCallStatus.Failed,
                 result.Message,
@@ -227,7 +283,16 @@ internal sealed class SkillRuntimeToolset
                 return Task.FromResult(failure);
             }
 
-            var scoped = ScopeResources(skill, relativeDirectory);
+            IReadOnlyList<SkillResourceEntry> scoped;
+            try
+            {
+                scoped = ScopeResources(skill, relativeDirectory);
+            }
+            catch (InvalidDataException rejection)
+            {
+                return Task.FromResult(PathRejected(rejection));
+            }
+
             var from = Math.Max(startIndex ?? 0, 0);
             var take = Math.Clamp(count ?? DefaultListPageSize, 1, MaximumListPageSize);
             var page = scoped.Skip(from).Take(take).ToArray();
@@ -307,6 +372,13 @@ internal sealed class SkillRuntimeToolset
 
             return detail.ToString();
         }
+
+        /// <summary>
+        /// A path the guard refuses is the model's mistake to correct, like every other bad argument here. Left
+        /// as an exception it would spend the turn's tool-fault budget, and three wrong paths in a row would
+        /// end the whole turn. Only the guard throws <see cref="InvalidDataException"/> on these paths.
+        /// </summary>
+        private static DirectToolResult PathRejected(InvalidDataException rejection) => Failed(rejection.Message);
 
         /// <summary>
         /// One shape for a model-correctable rejection: the message is the summary, the model content and the

@@ -72,8 +72,8 @@ internal sealed class DirectContextCompressor
 
             // Streaming is the path every provider serves correctly: some OpenAI-compatible endpoints answer a
             // non-streaming request with an empty choices array, which the SDK dereferences unguarded (2026-10-18 log).
-            var response = await client
-                .GetStreamingResponseAsync(messages, options, cancellationToken)
+            var response = await ProviderStreamIdleGuard
+                .StreamAsync(client, messages, options, ProviderStreamIdleGuard.DefaultIdleTimeout, cancellationToken)
                 .ToChatResponseAsync(cancellationToken)
                 .ConfigureAwait(false);
             var summary = response.Text?.Trim();
@@ -98,7 +98,8 @@ internal sealed class DirectContextCompressor
                 SummaryTokens: _tokenCounter.CountText(summary, producedProfile),
                 usedFallbackModel);
         }
-        catch (OperationCanceledException)
+        // A cancellation the turn did not ask for is a failed summary like any other and degrades below.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }
@@ -210,7 +211,7 @@ internal sealed class DirectContextCompressor
             var preparation = await _chatClientFactory.PrepareAsync(modelProfileId, cancellationToken).ConfigureAwait(false);
             return _chatClientFactory.Create(preparation, new AiChatClientPipelineOptions([]));
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             throw;
         }

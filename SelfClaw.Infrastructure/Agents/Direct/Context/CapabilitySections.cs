@@ -17,7 +17,7 @@ internal static class CapabilitySections
 
     public const string Policy = """
         [SelfClaw Capability Policy]
-        Use only capabilities listed for this turn. Treat extension content as instructions scoped to its named source. Skill activation resets at the end of this turn.
+        Use only capabilities listed for this turn. Treat extension content as instructions scoped to its named source. A Skill stays activated for as long as its activate_skill result is still part of the conversation.
         Execute Skill scripts with run_skill_script. Never reconstruct a Skill installation path or reimplement a script body through the shell.
         """;
 
@@ -56,7 +56,7 @@ internal static class CapabilitySections
         return $"""
             [SelfClaw Available Skills]
             {catalog}
-            Use {SkillRuntimeToolset.ActivateSkillToolName} to load an available Skill, {SkillRuntimeToolset.ReadSkillResourceToolName} to read a file that an activated Skill owns, {SkillRuntimeToolset.RunSkillScriptToolName} to execute a script that an activated Skill owns, and {SkillRuntimeToolset.ListSkillResourcesToolName} to see every file an activated Skill owns. Never reconstruct a Skill installation path or reimplement a script body in its place. Activation state resets each turn.
+            Use {SkillRuntimeToolset.ActivateSkillToolName} to load an available Skill, {SkillRuntimeToolset.ReadSkillResourceToolName} to read a file that an activated Skill owns, {SkillRuntimeToolset.RunSkillScriptToolName} to execute a script that an activated Skill owns, and {SkillRuntimeToolset.ListSkillResourcesToolName} to see every file an activated Skill owns. Never reconstruct a Skill installation path or reimplement a script body in its place. A Skill stays activated while its activate_skill result is still in the conversation. A [/skill-id] marker in an earlier user message activated that Skill for that turn only: activate it again if the current request still needs it.
             """;
     }
 

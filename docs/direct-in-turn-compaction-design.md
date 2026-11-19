@@ -64,11 +64,11 @@
 
 ### 3.1 检查点位置
 
-在 `DirectTurnRun.RunAsync` 循环顶部、`ConsumeAvailableInputsAsync` 之前，且 `requestIndex ≥ 1`（实现为 `DirectCompactionStep.CompactInTurnAsync` + `EnsureInTurnPromptFitsWindow`）：
+在 `DirectTurnRun.RunAsync` 循环顶部、`ConsumeAvailableInputsAsync` 之前，且 `requestIndex ≥ 1`（实现为 `DirectCompactionStep.CheckpointInTurnAsync`：测一次上下文 → 需要时压缩并重测 → 窗口校验）：
 
 ```text
 for requestIndex in 0..MaximumProviderRequestsPerTurn-1:
-    if requestIndex > 0: CompactInTurnAsync()    // ← 检查点（DirectCompactionStep）
+    if requestIndex > 0: CheckpointInTurnAsync() // ← 检查点（DirectCompactionStep）
     ConsumeAvailableInputs()                     // steer 排空（FitsBudget 不变）
     ReadResponse()
     ... 工具执行与结果写回 ...
@@ -91,7 +91,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 
 计数成本：`CountTokens` 增量维护（只计新增消息）；`CountTools` 有 schema 指纹缓存。每次迭代的检查成本可忽略（C11 同）。
 
-回合内检查点不接 provider 实测下限（只有回合开始接，见 `direct-context-compaction-design.md` §5.4）：上一次请求的输入不含其后追加的响应与工具结果，压缩之后它描述的更是一个已不存在的 prompt。
+回合内检查点接 provider 实测下限（2026-11 修订，原先只有回合开始接）：`DirectTurnRun` 记下**本回合上一次请求**的实测输入 token（该请求没报 usage 则为 null，绝不沿用更早的值），触发判定取 `max(本地计数 + 输出预留, 实测输入)`。它只能抬高触发、不参与前缀规划，也不参与窗口校验。原先不接的两条理由都不成立：其一，上一次请求的 prompt 是当前 prompt 的严格前缀（之后只追加了响应与工具结果），作为**下限**恰好安全；其二，检查点在循环顶部、压缩之后必然先发一次请求才会再到检查点，所以这个值永远晚于最近一次摘要，不会描述一个已不存在的 prompt。接入的原因是本地计数系统性偏低：tokenizer 与 provider 不同、图片按常量计、reasoning 的签名数据不可见，长工具回合会在本地判断「没到阈值」时先被 provider 以超窗拒绝。只取输入、不加输出：部分协议的输出 token 含不会重放的 reasoning，加进去会高估。回合内响应里的 `TextReasoningContent` 文本本身已由 `DirectTokenCounter` 计入（落库历史重放不带 reasoning，所以只影响回合内）。
 
 ### 3.3 规划（复用 `PlanCompression`）
 
@@ -104,7 +104,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 
 `MaximumInTurnCompactionsPerTurn = 10`（常量，原 3）。**失败尝试也计入**（约束延迟与成本）；达到上限后不再压缩，请求继续发送。压缩调用**不计入** `MaximumProviderRequestsPerTurn`。
 
-**窗口校验不再只在压缩后**：每个请求前（`requestIndex > 0`）都跑一次 `EnsureInTurnPromptFitsWindow`。原因是压缩额度用尽后没有任何机制会再缩小 prompt，只靠压缩后校验等于放行一个必然超窗的请求、再由 provider 返回一个不可读的 400。现在超窗由我们自己报可读错误：`The conversation has outgrown the model context window: … approximately {total} tokens, exceeding the window of {window} tokens.`，并在额度耗尽时明确 `The turn used all {n} of its in-turn compactions and still does not fit.`。没有声明窗口的模型直接跳过（没有可比较的基准，且不为它付计数成本）；计数不可用时 fail-open（§5.5）。
+**窗口校验不再只在压缩后**：每个请求前（`requestIndex > 0`）检查点的最后一步都是窗口校验（`DirectCompactionStep.EnsureInTurnPromptFitsWindow`，复用检查点已测的值）。原因是压缩额度用尽后没有任何机制会再缩小 prompt，只靠压缩后校验等于放行一个必然超窗的请求、再由 provider 返回一个不可读的 400。现在超窗由我们自己报可读错误：`The conversation has outgrown the model context window: … approximately {total} tokens, exceeding the window of {window} tokens.`，并在额度耗尽时明确 `The turn used all {n} of its in-turn compactions and still does not fit.`。没有声明窗口的模型直接跳过（没有可比较的基准，且不为它付计数成本）；计数不可用时 fail-open（§5.5）。
 
 ## 3. 上限与终止（2026-10 修订）
 
@@ -163,7 +163,7 @@ threshold = 窗口×ThresholdRatio 或 AbsoluteThresholdTokens   // 与回合开
 成功后：
 
 1. 从上下文移除前缀单元的全部消息；
-2. 摘要包裹为 `<selfclaw-context-summary version="1">…</selfclaw-context-summary>`（与 `CreateCompressionSection` 相同外壳与说明行）**追加到 system 文本末尾**；连续多次回合内压缩时**替换**本回合内 section（不叠加），旧内容经 `PreviousSummary` 传入；回合开始压缩的 section 保持原位不动；
+2. 摘要包裹为 `<selfclaw-context-summary version="1">…</selfclaw-context-summary>`（与回合开始摘要同一个 `DirectSystemPrompt.CreateSummarySection` 外壳与说明行）**追加到 system 文本末尾**；连续多次回合内压缩时**替换**本回合内 section（不叠加），旧内容经 `PreviousSummary` 传入；回合开始压缩的 section 保持原位不动；
 3. 重计数；`counted' + reserve > window` → 抛与 `EnsurePromptFitsWindow` 同族的可读错误（决策 A）。
 
 ⚠ 布局说明：回合开始压缩的 section 位于能力指令之前（C6 的字节布局约束，目的是"无压缩时与旧实现逐字节一致"）。回合内 section 追加在 system 文本末尾，只在回合内压缩发生后出现——这条路径在旧实现中不存在，不违反该约束。

@@ -275,14 +275,34 @@ public sealed class DirectAgentChatRuntimeTests
     [Fact]
     public async Task StreamTurnAsync_propagates_cancellation_and_disposes_client()
     {
+        using var stop = new CancellationTokenSource();
         var client = new ScriptedChatClient(
             [Update("m", new TextContent("partial"))],
-            new OperationCanceledException());
+            new OperationCanceledException()) { BeforeTerminalException = stop.Cancel };
         var runtime = CreateRuntime(new FakeChatClientFactory(client));
 
-        var action = () => CollectAsync(runtime.StreamTurnAsync(CreateRequest(Guid.NewGuid())));
+        var action = () => CollectAsync(runtime.StreamTurnAsync(CreateRequest(Guid.NewGuid()), stop.Token));
 
         await action.Should().ThrowAsync<OperationCanceledException>();
+        client.IsDisposed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task A_cancellation_the_turn_did_not_ask_for_is_a_failure_not_a_user_stop()
+    {
+        // An SDK or HTTP timeout surfaces as a cancellation while the turn's own token is still live.
+        var client = new ScriptedChatClient(
+            [Update("m", new TextContent("partial"))],
+            new TaskCanceledException("the provider dropped the stream"));
+        var runtime = CreateRuntime(new FakeChatClientFactory(client));
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(Guid.NewGuid())));
+
+        var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
+        terminal.Status.Should().Be(RunCompletionStatus.Failed);
+        terminal.FinalText.Should().Be("partial");
+        terminal.ErrorMessage.Should().StartWith(DirectAgentChatRuntime.ExternalCancellationMessage)
+            .And.Contain("the provider dropped the stream");
         client.IsDisposed.Should().BeTrue();
     }
 
@@ -449,13 +469,18 @@ public sealed class DirectAgentChatRuntimeTests
         Exception failure = canceled
             ? new OperationCanceledException("provider setup canceled")
             : new InvalidOperationException("provider setup failed");
-        var factory = new FakeChatClientFactory(new ScriptedChatClient([])) { FactoryException = failure };
+        using var stop = new CancellationTokenSource();
+        var factory = new FakeChatClientFactory(new ScriptedChatClient([]))
+        {
+            FactoryException = failure,
+            BeforeFactoryException = canceled ? stop.Cancel : null
+        };
         var runtime = CreateRuntime(factory, new FakeCapabilityResolver(capabilityLease));
         var request = CreateRequest(useDefaultModel ? null : factory.Profile.Id);
 
         if (canceled)
         {
-            var action = () => CollectAsync(runtime.StreamTurnAsync(request));
+            var action = () => CollectAsync(runtime.StreamTurnAsync(request, stop.Token));
             await action.Should().ThrowAsync<OperationCanceledException>();
         }
         else
@@ -573,13 +598,14 @@ public sealed class DirectAgentChatRuntimeTests
     [Fact]
     public async Task Cancellation_propagates_without_a_success_terminal()
     {
+        using var stop = new CancellationTokenSource();
         var client = new ScriptedChatClient(
             [Update("m", new TextContent("partial"))],
-            new OperationCanceledException());
+            new OperationCanceledException()) { BeforeTerminalException = stop.Cancel };
         var factory = new FakeChatClientFactory(client);
         var runtime = CreateRuntime(factory);
 
-        var action = () => CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+        var action = () => CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id), stop.Token));
 
         await action.Should().ThrowAsync<OperationCanceledException>();
     }
@@ -778,6 +804,9 @@ public sealed class DirectAgentChatRuntimeTests
         public ChatOptions Options { get; init; } = new();
         public AiUsageUpdateKind UsageUpdateKind { get; init; } = AiUsageUpdateKind.Cumulative;
         public Exception? FactoryException { get; init; }
+
+        /// <summary>Lets a test cancel the turn's own token at the moment the factory fails.</summary>
+        public Action? BeforeFactoryException { get; init; }
         public Exception? PreparationException { get; init; }
         public IReadOnlyList<AITool> LastTools { get; private set; } = [];
         public AiChatClientPipelineOptions? LastPipeline { get; private set; }
@@ -804,7 +833,11 @@ public sealed class DirectAgentChatRuntimeTests
             LastPipeline = pipeline;
             var options = Options.Clone();
             options.Tools ??= pipeline.Tools.ToList();
-            if (FactoryException is not null) throw FactoryException;
+            if (FactoryException is not null)
+            {
+                BeforeFactoryException?.Invoke();
+                throw FactoryException;
+            }
             return new AiChatClientLease(_client, options, Profile, new HttpClient(), UsageUpdateKind);
         }
     }
@@ -826,6 +859,9 @@ public sealed class DirectAgentChatRuntimeTests
         }
 
         public List<ChatMessage> LastMessages { get; } = [];
+
+        /// <summary>Lets a test cancel the turn's own token at the moment the stream fails.</summary>
+        public Action? BeforeTerminalException { get; init; }
         public bool IsDisposed { get; private set; }
         public int StreamingCalls { get; private set; }
 
@@ -849,6 +885,7 @@ public sealed class DirectAgentChatRuntimeTests
 
             if (_terminalException is not null)
             {
+                BeforeTerminalException?.Invoke();
                 throw _terminalException;
             }
 

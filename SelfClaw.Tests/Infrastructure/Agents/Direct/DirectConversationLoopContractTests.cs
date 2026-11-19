@@ -62,12 +62,14 @@ public sealed class DirectConversationLoopContractTests
         var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
         terminal.Status.Should().Be(scenario is "filter" or "refusal" ? RunCompletionStatus.Blocked : RunCompletionStatus.Failed);
         terminal.FinalText.Should().StartWith("partial");
-        if (scenario is "filter" or "refusal")
-        {
-            var results = events.OfType<ToolCallCompletedEvent>().ToArray();
-            results.Select(result => result.ToolCallId).Should().Equal("a", "b");
-            results.Should().OnlyContain(result => result.Status == ToolCallStatus.Canceled && result.ResultSummary == "ProviderContentFilter");
-        }
+        // Both calls were announced to the transcript, so every way of ending the turn here has to close them.
+        var results = events.OfType<ToolCallCompletedEvent>().ToArray();
+        results.Select(result => result.ToolCallId).Should().Equal("a", "b");
+        var expectedReason = scenario is "filter" or "refusal"
+            ? DirectLoopMessages.ContentFilterReason
+            : DirectLoopMessages.ProviderErrorReason;
+        results.Should().OnlyContain(result =>
+            result.Status == ToolCallStatus.Canceled && result.ResultSummary == expectedReason);
         if (scenario == "refusal") terminal.FinalText.Should().Be("partialrefused");
         var usage = events.OfType<UsageReportedEvent>().Should().ContainSingle().Subject.Usage;
         usage.InputTokens.Should().Be(10);
@@ -428,6 +430,24 @@ public sealed class DirectConversationLoopContractTests
         events.OfType<RunCompletedEvent>().Should().BeEmpty("the consuming turn engine owns cancellation finalization");
     }
 
+    [Fact]
+    public async Task A_tool_cancellation_the_turn_did_not_ask_for_is_a_tool_fault_the_model_sees()
+    {
+        // A tool's own timeout or a dropped MCP connection surfaces as a cancellation while the turn's token
+        // is still live. It must not end the turn as "stopped by the user".
+        var provider = new Provider((n, _, _) => n == 1
+            ? Reply(Update(n, ChatFinishReason.ToolCalls, Call("a")))
+            : Reply(Update(n, ChatFinishReason.Stop, new TextContent("recovered"))));
+        var (runtime, request) = Runtime(provider, Tool(() => throw new TaskCanceledException("the server went away")));
+
+        var events = await CollectAsync(runtime, request);
+
+        provider.Requests.Should().Be(2, "the model gets the failure and answers");
+        events.OfType<ToolCallCompletedEvent>().Should().ContainSingle().Which.Should().Match<ToolCallCompletedEvent>(
+            result => result.Status == ToolCallStatus.Failed && result.ResultSummary == "the server went away");
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -440,6 +460,10 @@ public sealed class DirectConversationLoopContractTests
         var events = await CollectAsync(runtime, request);
         provider.Requests.Should().Be(1);
         executions.Should().Be(0);
+        events.OfType<ToolCallCompletedEvent>().Should().ContainSingle().Which.Should().Match<ToolCallCompletedEvent>(
+            result => result.ToolCallId == "a" && result.Status == ToolCallStatus.Canceled &&
+                      result.ResultSummary == DirectLoopMessages.OutputTruncatedReason,
+            "the announced call must not be left without a terminal event");
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status
             .Should().Be(hasText ? RunCompletionStatus.Truncated : RunCompletionStatus.Failed);
     }

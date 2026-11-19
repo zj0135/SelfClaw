@@ -43,37 +43,39 @@ internal static class DirectSystemPrompt
     }
 
     /// <summary>
-    /// Joins the system sections in the one order every caller must share, so a caller can count them and
-    /// keep the counting with <see cref="DirectPromptMeter"/> instead of this type.
+    /// The system sections a turn starts with, in the one order every caller must share. The task plan is not
+    /// among them: it is the only section that can change mid-turn, so <see cref="DirectConversationContext"/>
+    /// appends it (and an in-turn summary) after this text with <see cref="JoinSections"/>.
     /// </summary>
     internal static string? BuildSystemText(
         string agentInstructions,
         IReadOnlyList<string> systemInstructions,
         DirectTurnExecutionContext executionContext,
-        ConversationCompactionRecord? compression,
-        string? todoSection = null)
+        ConversationCompactionRecord? compression)
     {
         ArgumentNullException.ThrowIfNull(systemInstructions);
         ArgumentNullException.ThrowIfNull(executionContext);
         // The summary is a system section, not a user message: it is runtime-supplied context, and it sits after
         // the agent and completion instructions but before capability instructions so an uncompressed prompt
-        // keeps its exact byte layout. The plan snapshot has no content of its own, so it is only ever supplied
-        // by a caller that already knows a compaction covered the plan.
-        var sections = new[]
-            {
-                agentInstructions,
-                executionContext.CompletionBatch is null ? null : CompletionInstruction,
-                compression is null ? null : CreateCompressionSection(compression),
-                todoSection
-            }
-            .Concat(systemInstructions)
-            .Where(section => !string.IsNullOrWhiteSpace(section))
-            .ToArray();
-        return sections.Length == 0 ? null : string.Join("\n\n", sections);
+        // keeps its exact byte layout.
+        return JoinSections(
+        [
+            agentInstructions,
+            executionContext.CompletionBatch is null ? null : CompletionInstruction,
+            compression is null ? null : CreateSummarySection(compression.Summary),
+            .. systemInstructions
+        ]);
     }
 
-    internal static string CreateCompressionSection(ConversationCompactionRecord compression)
-        => CreateSummarySection(compression.Summary);
+    /// <summary>
+    /// The single separator rule for system sections, so the text that is counted and the text that is sent
+    /// are joined the same way wherever they are assembled.
+    /// </summary>
+    internal static string? JoinSections(params string?[] sections)
+    {
+        var present = sections.Where(section => !string.IsNullOrWhiteSpace(section)).ToArray();
+        return present.Length == 0 ? null : string.Join("\n\n", present);
+    }
 
     /// <summary>
     /// The single source of the summary section format: the turn-start compaction and the in-turn
