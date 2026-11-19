@@ -76,6 +76,27 @@ public sealed class DirectConversationLoopContractTests
         provider.Disposed.Should().BeTrue();
     }
 
+    [Fact]
+    public async Task An_empty_refusal_content_does_not_block_a_healthy_response()
+    {
+        // An OpenAI-compatible gateway that stamps "refusal": "" on every frame surfaces it as an
+        // ErrorContent("Refusal") without text; that must not end a turn whose tools are complete.
+        var executions = 0;
+        var provider = new Provider((n, _, _) => n == 1
+            ? Reply(Update(n, ChatFinishReason.ToolCalls, new TextContent("partial")),
+                Update(n, null, Call("a")),
+                Update(n, null, new ErrorContent(string.Empty) { ErrorCode = "Refusal" }))
+            : Reply(Update(n, ChatFinishReason.Stop, new TextContent("done"))));
+        var (runtime, request) = Runtime(provider, Tool(() => { executions++; return Success(); }));
+        var events = await CollectAsync(runtime, request);
+
+        executions.Should().Be(1);
+        provider.Requests.Should().Be(2);
+        var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
+        terminal.Status.Should().Be(RunCompletionStatus.Succeeded);
+        terminal.FinalText.Should().Be("partialdone");
+    }
+
     [Theory]
     [InlineData("empty", false)]
     [InlineData("usage", false)]

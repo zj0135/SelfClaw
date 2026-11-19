@@ -286,10 +286,19 @@ internal sealed class DirectTurnRun
     private static DirectLoopOutcome? GetTerminalOutcome(ChatResponse response)
     {
         var contents = response.Messages.SelectMany(message => message.Contents).ToArray();
-        if (response.FinishReason == ChatFinishReason.ContentFilter || contents.OfType<ErrorContent>().Any(error => error.ErrorCode == "Refusal"))
+        var errors = contents.OfType<ErrorContent>().ToArray();
+        if (response.FinishReason == ChatFinishReason.ContentFilter || errors.Any(IsRefusal))
+        {
             return DirectLoopOutcome.ContentFiltered;
-        if (contents.OfType<ErrorContent>().FirstOrDefault() is { } error)
+        }
+
+        // An empty refusal is a wire artifact, not a provider error: an OpenAI-compatible gateway that
+        // stamps "refusal": "" on every frame would otherwise fail every turn it serves.
+        if (errors.FirstOrDefault(error => !IsEmptyRefusal(error)) is { } error)
+        {
             throw new InvalidDataException($"The provider returned an error: {error.Message}");
+        }
+
         if (response.FinishReason == ChatFinishReason.Length) return DirectLoopOutcome.Length;
         if (response.FinishReason is { } reason && reason != ChatFinishReason.Stop && reason != ChatFinishReason.ToolCalls)
             throw new InvalidDataException($"The provider returned an unsupported finish reason: '{reason}'.");
@@ -297,6 +306,12 @@ internal sealed class DirectTurnRun
             throw new InvalidDataException("The provider returned no response content or completion information.");
         return null;
     }
+
+    private static bool IsRefusal(ErrorContent error) =>
+        error.ErrorCode == "Refusal" && !string.IsNullOrWhiteSpace(error.Message);
+
+    private static bool IsEmptyRefusal(ErrorContent error) =>
+        error.ErrorCode == "Refusal" && string.IsNullOrWhiteSpace(error.Message);
 
     private static bool HasResponseContent(AIContent content) => content switch
     {

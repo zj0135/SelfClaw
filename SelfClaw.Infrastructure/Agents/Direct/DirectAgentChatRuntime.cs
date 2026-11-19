@@ -213,6 +213,10 @@ internal sealed class DirectAgentChatRuntime : IAgentRuntimeAdapter
                     "Direct AI agent turn repeated the same tool batch {RepeatLimit} times and was stopped as stalled.",
                     NoProgressGuard.RepeatedBatchLimit);
                 break;
+            case DirectLoopOutcome.ContentFiltered:
+                _logger.LogWarning(
+                    "Direct AI agent turn was blocked by the provider's content filter or refusal.");
+                break;
         }
     }
 }

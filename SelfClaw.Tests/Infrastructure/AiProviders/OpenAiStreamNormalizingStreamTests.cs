@@ -149,6 +149,39 @@ public sealed class OpenAiStreamNormalizingStreamTests
         output.Should().Be(input);
     }
 
+    [Fact]
+    public async Task Empty_refusal_is_dropped_from_the_frame()
+    {
+        // Gateways that stamp "refusal": "" on every frame make M.E.AI report an ErrorContent("Refusal")
+        // with no text, which Direct read as a provider refusal on an otherwise healthy response.
+        const string input = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\",\"refusal\":\"\"}}]}\n\n";
+
+        var output = await TransformAsync(input);
+
+        output.Should().Be("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n");
+        output.Should().NotContain("refusal");
+    }
+
+    [Fact]
+    public async Task Null_refusal_is_dropped_from_the_frame()
+    {
+        const string input = "data: {\"choices\":[{\"delta\":{\"content\":\"hi\",\"refusal\":null}}]}\n\n";
+
+        var output = await TransformAsync(input);
+
+        output.Should().Be("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n");
+    }
+
+    [Fact]
+    public async Task Refusal_text_is_preserved_verbatim()
+    {
+        const string input = "data: {\"choices\":[{\"delta\":{\"refusal\":\"I can't help with that\"}}]}\n\n";
+
+        var output = await TransformAsync(input);
+
+        output.Should().Be(input);
+    }
+
     private static async Task<string> TransformAsync(string input, int chunkSize = int.MaxValue)
     {
         await using var source = new ChunkedStream(Encoding.UTF8.GetBytes(input), chunkSize);
