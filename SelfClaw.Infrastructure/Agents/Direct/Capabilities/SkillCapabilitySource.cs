@@ -209,14 +209,16 @@ internal sealed class SkillCapabilitySource
             return [];
         }
 
-        var replayedMessageIds = DirectHistoryReplay
-            .SelectReplayedMessages(request.Messages, request.Turns, request.Compression)
-            .Select(message => message.Id)
-            .ToHashSet();
+        var replayedMessages = DirectHistoryReplay
+            .SelectReplayedMessages(request.Messages, request.Turns, request.Compression);
+        var replayedMessageIds = replayedMessages.Select(message => message.Id).ToHashSet();
+        // A replayed message can still have lost the activation: an in-turn compaction covers the front of
+        // the assistant message it happened in.
         return runs
             .Where(run => run.ToolName == SkillRuntimeToolset.ActivateSkillToolName &&
                           run.Status == ToolExecutionStatus.Completed &&
-                          run.MessageId is Guid messageId && replayedMessageIds.Contains(messageId))
+                          run.MessageId is Guid messageId && replayedMessageIds.Contains(messageId) &&
+                          !DirectHistoryReplay.IsCovered(replayedMessages, run, request.Compression))
             .Select(run => SkillRuntimeToolset.ReadActivatedSkillId(run.ArgumentsJson))
             .OfType<string>()
             .Where(resolvedSkills.ContainsKey)

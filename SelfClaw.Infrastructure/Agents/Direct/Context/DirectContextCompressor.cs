@@ -23,6 +23,9 @@ internal sealed class DirectContextCompressor
     /// <summary>Ceiling for the summary budget: a summary that long no longer buys room back.</summary>
     private const int MaximumSummaryTokens = 4096;
 
+    // The part of a prefix one summary request carries, with the count its output budget is sized from.
+    private readonly record struct SummaryChunk(IReadOnlyList<ChatMessage> Messages, int SourceTokens);
+
     private readonly IAiChatClientFactory _chatClientFactory;
     private readonly IAiModelCatalog _modelCatalog;
     private readonly IDirectTokenCounter _tokenCounter;
@@ -45,39 +48,17 @@ internal sealed class DirectContextCompressor
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var messages = CreateSummarizerMessages(request);
-        // Only the output cap is set: the remaining sampling stays at the provider's default instead of
-        // re-deriving the model profile's values here.
-        var options = new ChatOptions { MaxOutputTokens = OutputTokenBudget(request.SourceTokens) };
-
         AiChatClientLease? dedicatedLease = null;
         try
         {
-            var usedFallbackModel = false;
-            IChatClient client;
-            AiModelProfile producedProfile;
-            if (request.ModelProfileId is Guid modelProfileId &&
-                await TryCreateDedicatedLeaseAsync(modelProfileId, cancellationToken).ConfigureAwait(false) is { } lease)
+            if (request.ModelProfileId is Guid modelProfileId)
             {
-                dedicatedLease = lease;
-                client = lease.Client;
-                producedProfile = lease.Profile;
-            }
-            else
-            {
-                usedFallbackModel = request.ModelProfileId is not null;
-                client = request.TurnLease.Client;
-                producedProfile = request.TurnLease.Profile;
+                dedicatedLease = await TryCreateDedicatedLeaseAsync(modelProfileId, cancellationToken).ConfigureAwait(false);
             }
 
-            // Streaming is the path every provider serves correctly: some OpenAI-compatible endpoints answer a
-            // non-streaming request with an empty choices array, which the SDK dereferences unguarded (2026-10-18 log).
-            var response = await ProviderStreamIdleGuard
-                .StreamAsync(client, messages, options, ProviderStreamIdleGuard.DefaultIdleTimeout, cancellationToken)
-                .ToChatResponseAsync(cancellationToken)
-                .ConfigureAwait(false);
-            var summary = response.Text?.Trim();
-            if (string.IsNullOrWhiteSpace(summary))
+            var summarizer = dedicatedLease ?? request.TurnLease;
+            var summary = await SummarizeAsync(request, summarizer, cancellationToken).ConfigureAwait(false);
+            if (summary is null)
             {
                 _logger.LogWarning(
                     "Context compression returned no summary for conversation {ConversationId} turn {TurnId}.",
@@ -88,15 +69,15 @@ internal sealed class DirectContextCompressor
 
             return new DirectCompressionResult(
                 summary,
-                producedProfile.Model,
+                summarizer.Profile.Model,
                 // One unit is one stored conversation message, so a unit carrying a tool call plus its
                 // result must not inflate the message count the transcript reports.
                 request.PrefixUnits.Count,
                 request.SourceTokens,
                 // The summary is counted with the profile that actually produced it: the dedicated
                 // compression model, or the turn model when the policy's model was unusable.
-                SummaryTokens: _tokenCounter.CountText(summary, producedProfile),
-                usedFallbackModel);
+                SummaryTokens: _tokenCounter.CountText(summary, summarizer.Profile),
+                UsedFallbackModel: request.ModelProfileId is not null && dedicatedLease is null);
         }
         // A cancellation the turn did not ask for is a failed summary like any other and degrades below.
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -118,24 +99,119 @@ internal sealed class DirectContextCompressor
         }
     }
 
-    private static List<ChatMessage> CreateSummarizerMessages(DirectCompressionRequest request)
+    /// <summary>
+    /// Summarizes the prefix, in several chained calls when it would not fit the summarizer in one: each call
+    /// hands its summary to the next as the previous summary. Null means one call produced nothing, and nothing
+    /// partial is ever returned, because a summary of half the prefix would silently drop the other half.
+    /// </summary>
+    private async Task<string?> SummarizeAsync(
+        DirectCompressionRequest request,
+        AiChatClientLease summarizer,
+        CancellationToken cancellationToken)
     {
-        var messages = new List<ChatMessage> { new(ChatRole.System, CompressionInstruction.Text) };
-        if (!string.IsNullOrWhiteSpace(request.PreviousSummary))
+        var summary = request.PreviousSummary;
+        foreach (var chunk in SplitIntoChunks(request, summarizer.Profile))
+        {
+            summary = await SummarizeChunkAsync(summarizer, summary, chunk, cancellationToken).ConfigureAwait(false);
+            if (summary is null)
+            {
+                return null;
+            }
+        }
+
+        return summary;
+    }
+
+    private async Task<string?> SummarizeChunkAsync(
+        AiChatClientLease summarizer,
+        string? previousSummary,
+        SummaryChunk chunk,
+        CancellationToken cancellationToken)
+    {
+        var messages = new List<ChatMessage>(chunk.Messages.Count + 2) { new(ChatRole.System, CompressionInstruction.Text) };
+        if (!string.IsNullOrWhiteSpace(previousSummary))
         {
             messages.Add(new ChatMessage(
                 ChatRole.User,
-                $"<selfclaw-context-summary version=\"1\">\n{request.PreviousSummary}\n</selfclaw-context-summary>"));
+                $"<selfclaw-context-summary version=\"1\">\n{previousSummary}\n</selfclaw-context-summary>"));
         }
 
         // The units already pair tool calls with their results, so replaying their messages keeps the
         // roles and the tool semantics instead of flattening everything into text.
-        foreach (var unit in request.PrefixUnits)
+        messages.AddRange(chunk.Messages);
+        // Only the output cap is set: the remaining sampling stays at the provider's default instead of
+        // re-deriving the model profile's values here.
+        var options = new ChatOptions
         {
-            messages.AddRange(PlaceholderizeAttachments(unit.Messages));
+            MaxOutputTokens = OutputTokenBudget(
+                chunk.SourceTokens, _tokenCounter.CountText(previousSummary, summarizer.Profile) ?? 0)
+        };
+
+        // Streaming is the path every provider serves correctly: some OpenAI-compatible endpoints answer a
+        // non-streaming request with an empty choices array, which the SDK dereferences unguarded (2026-10-18 log).
+        var response = await ProviderStreamIdleGuard
+            .StreamAsync(summarizer.Client, messages, options, ProviderStreamIdleGuard.DefaultIdleTimeout, cancellationToken)
+            .ToChatResponseAsync(cancellationToken)
+            .ConfigureAwait(false);
+        var summary = response.Text?.Trim();
+        return string.IsNullOrWhiteSpace(summary) ? null : summary;
+    }
+
+    /// <summary>
+    /// A prefix normally goes out in one request. It is split only when it would not fit the summarizer's own
+    /// window: a turn that was compacted in-turn stores more than one window of history in a single message,
+    /// and a request that large fails, which would leave the conversation unable to start another turn.
+    /// </summary>
+    private IReadOnlyList<SummaryChunk> SplitIntoChunks(DirectCompressionRequest request, AiModelProfile profile)
+    {
+        var messages = request.PrefixUnits.SelectMany(unit => PlaceholderizeAttachments(unit.Messages)).ToArray();
+        var whole = new SummaryChunk(messages, request.SourceTokens);
+        if (ResolveChunkBudget(profile) is not int budget || request.SourceTokens <= budget)
+        {
+            return [whole];
         }
 
-        return messages;
+        var chunks = new List<SummaryChunk>();
+        var current = new List<ChatMessage>();
+        var currentTokens = 0;
+        foreach (var message in messages)
+        {
+            if (_tokenCounter.CountMessages([message], profile) is not int tokens)
+            {
+                return [whole];
+            }
+
+            // A tool message answers the call right before it, so a chunk never starts with one.
+            if (current.Count > 0 && currentTokens + tokens > budget && message.Role != ChatRole.Tool)
+            {
+                chunks.Add(new SummaryChunk(current, currentTokens));
+                current = [];
+                currentTokens = 0;
+            }
+
+            current.Add(message);
+            currentTokens += tokens;
+        }
+
+        chunks.Add(new SummaryChunk(current, currentTokens));
+        return chunks;
+    }
+
+    /// <summary>
+    /// How much of a prefix one summary request may carry. Null when the summarizer declares no window or
+    /// counting is unavailable: nothing then says what fits, so the prefix goes out whole as it always did.
+    /// </summary>
+    private int? ResolveChunkBudget(AiModelProfile profile)
+    {
+        if (AiChatOptions.ResolveContextWindowTokens(profile) is not int window ||
+            _tokenCounter.CountText(CompressionInstruction.Text, profile) is not int instructionTokens)
+        {
+            return null;
+        }
+
+        // Room is held back for the answer and for the previous summary every call after the first carries.
+        var budget = (int)((window - (2 * MaximumSummaryTokens)) * DirectCompactionPlanner.UsableInputShare) - instructionTokens;
+        return budget > 0 ? budget : null;
     }
 
     /// <summary>
@@ -188,8 +264,11 @@ internal sealed class DirectContextCompressor
     private static FunctionResultContent Rebuild(FunctionResultContent result, object payload)
         => new(result.CallId, payload) { Exception = result.Exception };
 
-    private static int OutputTokenBudget(int sourceTokens)
-        => Math.Clamp(sourceTokens / 4, MinimumSummaryTokens, MaximumSummaryTokens);
+    // A chained call has to carry forward everything the previous summary held before it can add anything, so
+    // that summary's size is part of the budget: sized by the new prefix alone, a small prefix would squeeze
+    // the whole accumulated summary through the floor.
+    private static int OutputTokenBudget(int sourceTokens, int previousSummaryTokens)
+        => Math.Clamp(previousSummaryTokens + (sourceTokens / 4), MinimumSummaryTokens, MaximumSummaryTokens);
 
     private async Task<AiChatClientLease?> TryCreateDedicatedLeaseAsync(
         Guid modelProfileId,

@@ -35,7 +35,7 @@ public sealed class TranscriptProjection
         var state = new TranscriptRenderState(stableItems, request.AutoScroll, _navigation,
             request.SelectedConversationId?.ToString("D"), request.IsBusy, request.IsContinuation, request.ActivityText, request.AgentMode,
             request.SelectedAgentId, request.SelectedAgentName, request.CapabilityRevision, request.ToolPermissionMode,
-            BuildUsageSummary(request.Turns, request.LiveUsage), Todo: todo);
+            BuildUsageSummary(request.Turns, request.LiveUsage, request.CompactionTriggerTokens), Todo: todo);
         if (state == _lastState) return null;
         _lastState = state;
         return state;
@@ -156,7 +156,7 @@ public sealed class TranscriptProjection
     }
 
     private static TranscriptUsageSummary? BuildUsageSummary(IReadOnlyList<ConversationTurnRecord> turns,
-        TranscriptLiveUsage? liveUsage)
+        TranscriptLiveUsage? liveUsage, int? compactionTriggerTokens)
     {
         long inputTokens = 0;
         long outputTokens = 0;
@@ -202,7 +202,7 @@ public sealed class TranscriptProjection
         var context = lastRequestInputTokens ?? lastContextTokens;
         if (context is null) return null;
         return new TranscriptUsageSummary(inputTokens, outputTokens, context, contextWindowTokens, contextIsEstimated,
-            cachedInputTokens);
+            cachedInputTokens, compactionTriggerTokens);
     }
 
     /// <summary>

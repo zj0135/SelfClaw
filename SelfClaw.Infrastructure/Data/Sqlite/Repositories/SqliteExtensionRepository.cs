@@ -99,7 +99,7 @@ ON CONFLICT(kind, id) DO UPDATE SET
         command.Parameters.AddWithValue("$manifestJson", package.ManifestJson);
         command.Parameters.AddWithValue("$sourcePluginId", package.SourcePluginId ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$isEnabled", package.IsEnabled ? 1 : 0);
-        // Columns remain in schema v32. New rows store null; updates leave any existing values alone.
+        // The columns are still part of the schema. New rows store null; updates leave any existing values alone.
         command.Parameters.AddWithValue("$acknowledgedPermissions", DBNull.Value);
         command.Parameters.AddWithValue("$acknowledgedAt", DBNull.Value);
         command.Parameters.AddWithValue("$installedAt", package.InstalledAtUtc.ToString("O"));

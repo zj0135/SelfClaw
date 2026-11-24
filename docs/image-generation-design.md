@@ -130,7 +130,7 @@ SDK 侧用 `new GeneratedImageSize(w, h)` 序列化成 `"WxH"`。
 ## 7. 刻意不做
 
 - **`turn_usage` 记账**：`turn_usage` 是 conversation + turn 维度的，生图没有会话也没有回合；
-  为它伪造一条会话行会污染会话列表与用量口径。记账需要 schema 变更，而当前 schema 冻结在 v32
+  为它伪造一条会话行会污染会话列表与用量口径。记账需要 schema 变更，而 schema 每升一版旧库都会被只读拒绝
   （`AGENTS.md` 不变量 9：绝不迁移）。因此生图费用目前**不进**用量仪表盘，等 schema 升版时再补
   「非会话型开销」表。
 - **mask / 图生图蒙版**：协议支持 `mask`，但工作台没有画蒙版的入口。留着一条没有调用方的通路

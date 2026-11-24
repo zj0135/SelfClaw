@@ -175,26 +175,33 @@ internal sealed class DirectTurnPreparer
             request.Turns,
             toolExecutions,
             capabilityLease.MessageAdjustments,
-            attachmentContents);
+            attachmentContents,
+            request.Compression);
         // The plan is read from the stored history before compaction runs, so what it decides is independent
         // of the units this turn happens to replay.
         var plan = TodoPlanHistory.FindLatest(request.Messages, toolExecutions);
         var policy = await _compressionPolicy.GetAsync(cancellationToken).ConfigureAwait(false);
+        if (policy.Enabled)
+        {
+            writer.TryWrite(new ContextCompactionTriggerResolvedEvent(
+                DirectCompactionPlanner.ResolveTrigger(policy, budget)));
+        }
+
+        // Built once and handed to compaction, so the text and the protected tail that are counted are the
+        // ones the request sends.
+        var fixedText = DirectSystemPrompt.BuildFixedText(
+            request.Agent.Instructions, capabilityLease.SystemInstructions, request.ExecutionContext);
+        var trailingProtectedMessages = DirectSystemPrompt.BuildTrailingProtectedMessages(request.ExecutionContext);
         var compaction = await _compactionStep.CompactTurnStartAsync(
-                new DirectTurnCompaction(request, capabilityLease, providerLease, budget, policy, units, plan),
+                new DirectTurnCompaction(
+                    request, providerLease, budget, policy, units, plan, fixedText, trailingProtectedMessages),
                 writer,
                 cancellationToken)
             .ConfigureAwait(false);
         DirectCompactionStep.EnsureTurnStartPromptFitsWindow(budget, compaction);
         writer.TryWrite(new RunStatusEvent(AgentRunStatus.Requesting));
 
-        // The system text and the plan section are the ones compaction already counted, so the request that
-        // is sized and the request that is sent can never disagree about them.
-        var build = DirectHistoryReplay.Compose(
-            units,
-            compaction.SystemText,
-            DirectSystemPrompt.BuildTrailingProtectedMessages(request.ExecutionContext),
-            compaction.Compression);
+        var build = DirectHistoryReplay.Compose(units, fixedText, trailingProtectedMessages, compaction.Compression);
         return new DirectTurnSetup(
             capabilityLease,
             providerLease,
@@ -208,6 +215,8 @@ internal sealed class DirectTurnPreparer
             request.TurnId,
             request.InputSession,
             imageCapability.Delivery,
-            compaction.TodoSection);
+            compaction.TodoSection,
+            compaction.Compression?.Summary,
+            request.Messages.Count == 0 ? 0 : request.Messages.Max(message => message.Sequence));
     }
 }

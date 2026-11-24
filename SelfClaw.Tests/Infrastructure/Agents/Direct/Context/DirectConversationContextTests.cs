@@ -94,19 +94,19 @@ public sealed class DirectConversationContextTests
         context.AppendInputs([Steer(sequence: 1, "steer one")]);
         context.AppendResponse(Response("newest"));
         context.AppendInputs([Steer(sequence: 2, "steer two")]);
-        context.InTurnSummary.Should().BeNull();
+        context.Summary.Should().BeNull();
 
         context.ApplyInTurnCompaction("turned into a summary", coveredUnitCount: 2);
 
         context.Messages.Select(message => message.Role)
             .Should().Equal(ChatRole.System, ChatRole.User, ChatRole.Assistant, ChatRole.User);
         context.Messages.Select(message => message.Text).Should().Equal(
-            $"{SystemText}\n\n{DirectSystemPrompt.CreateSummarySection("turned into a summary")}",
+            $"{SystemText}\n\n{SummarySection("turned into a summary")}",
             "steer one",
             "newest",
             "steer two");
         context.BuildUnits().Select(unit => unit.SourceSequence).Should().Equal(3);
-        context.InTurnSummary.Should().Be("turned into a summary",
+        context.Summary.Should().Be("turned into a summary",
             "chained compaction hands the bare summary back to the compressor, which wraps it itself");
     }
 
@@ -123,12 +123,12 @@ public sealed class DirectConversationContextTests
         var system = context.Messages[0];
         system.Role.Should().Be(ChatRole.System);
         system.Text.Should().StartWith(SystemText);
-        system.Text.Should().EndWith(DirectSystemPrompt.CreateSummarySection("second summary"),
+        system.Text.Should().EndWith(SummarySection("second summary"),
             "the in-turn summary is appended at the end of the prompt's own system text");
         system.Text.Should().NotContain("first summary");
         system.Text.Split("<selfclaw-context-summary").Should().HaveCount(2, "only one in-turn section exists");
         context.Messages.Select(message => message.Text).Should().Equal(system.Text, "newest");
-        context.InTurnSummary.Should().Be("second summary");
+        context.Summary.Should().Be("second summary");
     }
 
     [Fact]
@@ -147,7 +147,7 @@ public sealed class DirectConversationContextTests
 
         context.CountTokens(counter, profile).Should().Be(CountEverything(counter, profile, context),
             "the tally is rebuilt from the compacted messages instead of keeping the pre-compaction total");
-        context.Messages[0].Text.Should().Contain(DirectSystemPrompt.CreateSummarySection("summary"));
+        context.Messages[0].Text.Should().Contain(SummarySection("summary"));
     }
 
     [Fact]
@@ -167,6 +167,119 @@ public sealed class DirectConversationContextTests
         empty.BuildUnits().Should().ContainSingle().Which.SourceSequence.Should().Be(1);
     }
 
+    [Fact]
+    public void The_summary_the_turn_started_with_is_the_section_an_in_turn_compaction_replaces()
+    {
+        var context = new DirectConversationContext(
+            SystemText, [Unit(4, "replayed")], [], planSection: "plan", summary: "stored summary");
+        context.AppendResponse(Response("newest"));
+
+        context.Summary.Should().Be("stored summary",
+            "the first in-turn compaction has to fold the summary the request already carries into its own");
+        context.Messages[0].Text.Should().Be($"{SystemText}\n\n{SummarySection("stored summary")}\n\nplan",
+            "the summary follows the fixed text and precedes the plan");
+
+        context.ApplyInTurnCompaction("folded summary", coveredUnitCount: 1);
+
+        var text = context.Messages[0].Text ?? string.Empty;
+        text.Should().Be($"{SystemText}\n\n{SummarySection("folded summary")}\n\nplan");
+        text.Split("<selfclaw-context-summary").Should().HaveCount(2, "a request never carries two summaries");
+    }
+
+    [Fact]
+    public void Covering_only_replayed_units_moves_the_boundary_to_the_last_of_them()
+    {
+        var context = new DirectConversationContext(
+            null, [Unit(4, "oldest"), Unit(5, "older"), Unit(6, "newest")], [], historyThroughSequence: 6);
+
+        var coverage = context.ApplyInTurnCompaction("summary", coveredUnitCount: 2, sourceTokens: 120);
+
+        coverage.Should().Be(new DirectInTurnCoverage(5, AnchorCallId: null, MessageCount: 2, SourceTokens: 120));
+    }
+
+    [Fact]
+    public void Covering_a_unit_of_the_turn_covers_the_stored_history_and_anchors_on_its_last_call()
+    {
+        // Sequence 7 stands for a stored message that forms no unit (a blocked turn): once the turn's own
+        // units are covered, everything stored before the turn began is behind the boundary.
+        var context = new DirectConversationContext(
+            null, [Unit(4, "older"), Unit(5, "newest")], [], historyThroughSequence: 7);
+        context.AppendResponse(ToolCallResponse("call-1", "call-2"));
+        context.AppendResults([new FunctionResultContent("call-1", "one"), new FunctionResultContent("call-2", "two")]);
+        context.AppendResponse(ToolCallResponse("call-3"));
+        context.AppendResults([new FunctionResultContent("call-3", "three")]);
+        context.AppendResponse(Response("newest"));
+
+        var first = context.ApplyInTurnCompaction("first", coveredUnitCount: 3, sourceTokens: 300);
+        var second = context.ApplyInTurnCompaction("second", coveredUnitCount: 1, sourceTokens: 50);
+
+        first.Should().Be(new DirectInTurnCoverage(7, "call-2", MessageCount: 3, SourceTokens: 300),
+            "two stored messages and the turn's own assistant message are covered");
+        second.Should().Be(new DirectInTurnCoverage(7, "call-3", MessageCount: 3, SourceTokens: 350),
+            "the coverage of one turn accumulates on one record");
+    }
+
+    [Fact]
+    public void A_consumed_steer_ends_what_a_stored_boundary_can_cover()
+    {
+        var context = new DirectConversationContext(null, [Unit(4, "replayed")], [], historyThroughSequence: 4);
+        context.AppendResponse(ToolCallResponse("call-1"));
+        context.AppendResults([new FunctionResultContent("call-1", "one")]);
+        context.AppendInputs([Steer(sequence: 6, "steer")]);
+        context.AppendResponse(ToolCallResponse("call-2"));
+        context.AppendResults([new FunctionResultContent("call-2", "two")]);
+        context.AppendResponse(ToolCallResponse("call-3"));
+        context.AppendResults([new FunctionResultContent("call-3", "three")]);
+
+        var crossing = context.ApplyInTurnCompaction("crossing", coveredUnitCount: 3, sourceTokens: 90);
+        var beyond = context.ApplyInTurnCompaction("beyond", coveredUnitCount: 1, sourceTokens: 30);
+
+        crossing.Should().Be(new DirectInTurnCoverage(4, "call-1", MessageCount: 2, SourceTokens: 90),
+            "the boundary stops in front of the steer, which stays in the prompt");
+        beyond.Should().BeNull("a stored boundary cannot step over a message that is still replayed");
+        context.Messages.Select(message => message.Text).Should().Contain("steer");
+        context.Summary.Should().Be("beyond", "the request itself still carries the newest summary");
+    }
+
+    [Fact]
+    public void The_completion_batch_does_not_end_the_stored_boundary()
+    {
+        var context = new DirectConversationContext(
+            null, [Unit(4, "replayed")], [new ChatMessage(ChatRole.User, "completion batch")],
+            historyThroughSequence: 4);
+        context.AppendResponse(ToolCallResponse("call-1"));
+        context.AppendResults([new FunctionResultContent("call-1", "one")]);
+        context.AppendResponse(Response("newest"));
+
+        var coverage = context.ApplyInTurnCompaction("summary", coveredUnitCount: 2);
+
+        coverage.Should().Be(new DirectInTurnCoverage(4, "call-1", MessageCount: 2, SourceTokens: null),
+            "the batch is never stored, so no stored message sits between the two covered units");
+    }
+
+    [Fact]
+    public void A_compaction_that_moves_no_stored_boundary_reports_no_coverage()
+    {
+        var context = new DirectConversationContext(null, [Unit(4, "replayed")], [], historyThroughSequence: 4);
+        context.AppendResponse(Response("an answer without a tool call"));
+        context.AppendResponse(Response("newest"));
+        context.ApplyInTurnCompaction("first", coveredUnitCount: 1).Should().NotBeNull();
+
+        var coverage = context.ApplyInTurnCompaction("second", coveredUnitCount: 1);
+
+        coverage.Should().BeNull("a response without a call has nothing to anchor on, so the next turn replays it");
+    }
+
+    [Fact]
+    public void Each_turn_has_its_own_in_turn_compaction_identity()
+    {
+        var context = new DirectConversationContext(null, [], []);
+
+        context.InTurnCompactionId.Should().NotBeEmpty();
+        context.InTurnCompactionId.Should().Be(context.InTurnCompactionId, "every summary of the turn rewrites one record");
+        new DirectConversationContext(null, [], []).InTurnCompactionId.Should().NotBe(context.InTurnCompactionId);
+    }
+
     private static int CountEverything(CharacterTokenCounter counter, AiModelProfile profile,
         DirectConversationContext context)
     {
@@ -179,14 +292,19 @@ public sealed class DirectConversationContextTests
         return total;
     }
 
+    // The section alone, as the production composition wraps a bare summary.
+    private static string SummarySection(string summary)
+        => DirectSystemPrompt.ComposeSystemText(null, summary, null) ?? string.Empty;
+
     private static DirectPromptHistoryUnit Unit(long sequence, string text)
         => new([new ChatMessage(ChatRole.User, text)], sequence);
 
     private static ChatResponse Response(string text)
         => new(new ChatMessage(ChatRole.Assistant, text));
 
-    private static ChatResponse ToolCallResponse(string callId)
-        => new(new ChatMessage(ChatRole.Assistant, [new FunctionCallContent(callId, "probe")]));
+    private static ChatResponse ToolCallResponse(params string[] callIds)
+        => new(new ChatMessage(ChatRole.Assistant,
+            [.. callIds.Select(callId => (AIContent)new FunctionCallContent(callId, "probe"))]));
 
     private static MessageRecord Steer(long sequence, string text)
     {

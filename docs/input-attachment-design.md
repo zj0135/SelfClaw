@@ -1,6 +1,6 @@
 # 输入框图片附件设计
 
-状态：已实施（A1–A6 完成并经独立审核）· 设计冻结（决策 A–G）· 更新：2026-11-18（决策 E 修订：含图 unit 参与压缩）· schema 仍为 v32（零 DDL）
+状态：已实施（A1–A6 完成并经独立审核）· 设计冻结（决策 A–G）· 更新：2026-11-18（决策 E 修订：含图 unit 参与压缩）· 零 DDL
 关系：扩展 [Direct 消息队列与 Steer 设计](direct-message-input-design.md) 的准入、载荷与回合语义；转录渲染沿用 [消息段设计](message-segments-system-design.md) 的既有图片段；压缩相关见 [回合开始压缩](direct-context-compaction-design.md) 与 [回合内压缩](direct-in-turn-compaction-design.md)；子代理不继承父附件见 [Subagent 设计](direct-subagent-system-design.md)。
 
 本文同时取代附件尚未接入时「输入入口一律拒绝」的历史表述：`attachments-unsupported` 只作为老库历史 reason 保留，不再有新的产生点。
@@ -24,7 +24,7 @@
 | A | 范围 | 只做图片；只做 Direct 的交互式输入（新对话 / 队列 follow-up / promote 成 steer）；CLI 与子代理继续拒绝 |
 | B | 上限 | 单文件 ≤ 10 MiB；每条输入 ≤ 6 张；白名单 `image/png`、`image/jpeg`、`image/webp`、`image/gif` |
 | C | 落盘布局 | `{AppData}/attachments/{conversationId}/{attachmentId}{ext}` |
-| D | schema | 不变，仍是 v32；附件引用走 `conversation_inputs.payload_json` 的可选字段 |
+| D | schema | 不变（零 DDL）；附件引用走 `conversation_inputs.payload_json` 的可选字段 |
 | E | 含图与压缩 | 含图 unit 与普通 unit 同等参与压缩规划，摘要请求里图片换成 `[image: name]` 文本占位；图片 token 计一个常数（2026-11-18 修订，理由见 §2 第 2 条） |
 | F | 能力闸门 | `IsModelAvailableAsync(modelId) && Configuration.IsMultimodal == true`（可用性与多模态必须同时成立）；前端按 `EnabledModelView.IsMultimodal` 禁用图片入口，宿主在准入时兜底拒绝 |
 | G | 清理 | 会话删除回收整目录；待发送附件在取消/丢弃时删除；启动时清理「会话已不存在」的残留目录 |
@@ -124,7 +124,7 @@
 
 ## 9. 不变量与已知限制
 
-- schema 仍是 v32：不新增表、不改列、不做迁移；附件引用只活在 `payload_json`。
+- 不改 schema：不新增表、不改列、不做迁移；附件引用只活在 `payload_json`。
 - 仅图片、仅 Direct 交互式输入；CLI 与子代理继续拒绝，父会话附件不泄漏给 child。
 - 前端闸门只读 `isMultimodal`；宿主是唯一裁决点，非法附件不会误发。
 - 附件所有权在 `send-prompt` 受理时转移到队列：受理后前端不得再对该 `attachmentId` 发 `attachments/discard`，否则消息里的图片会变成无源引用（转录占位、模型读不到字节）。

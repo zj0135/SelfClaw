@@ -332,7 +332,8 @@ public sealed class TranscriptProjectionTests
                 "ContextTokens",
                 "ContextWindowTokens",
                 "ContextIsEstimated",
-                "CachedInputTokens");
+                "CachedInputTokens",
+                "CompactionTriggerTokens");
         typeof(TranscriptConversationItem).GetProperties().Select(property => property.Name)
             .Should().BeEquivalentTo(
                 "Id",
@@ -614,6 +615,22 @@ public sealed class TranscriptProjectionTests
 
         state.Should().NotBeNull();
         state!.Usage.Should().BeEquivalentTo(new TranscriptUsageSummary(0, 0, 3_800, null, false));
+    }
+
+    [Fact]
+    public void Build_carries_the_compaction_trigger_beside_the_context_it_is_measured_against()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var turns = new[]
+        {
+            UsageTurn(now, new TurnUsage(InputTokens: 10, OutputTokens: 1, LastRequestInputTokens: 900, ContextWindowTokens: 32_000))
+        };
+
+        var state = CreateProjection().Build(CreateRequest(turns: turns) with { CompactionTriggerTokens = 16_000 });
+
+        state.Should().NotBeNull();
+        state!.Usage.Should().BeEquivalentTo(new TranscriptUsageSummary(10, 1, 900, 32_000, false,
+            CompactionTriggerTokens: 16_000));
     }
 
     [Fact]

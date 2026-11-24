@@ -175,6 +175,52 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         result.Status.Should().Be(coveredByCompaction ? ToolCallStatus.Failed : ToolCallStatus.Completed);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task An_in_turn_boundary_decides_inside_the_message_whether_an_activation_is_still_replayed(
+        bool anchoredOnActivation)
+    {
+        var review = await CreatePackageAsync("review", enabled: true);
+        var resolver = CreateResolver(new PackageRepository([review]));
+        var request = CreateRequest(["review"], "continue", "use the review skill");
+        var now = DateTimeOffset.UtcNow;
+        var earlier = request.Messages[0];
+        var assistantId = Guid.NewGuid();
+        var probe = new ToolExecutionRecord(Guid.NewGuid(), request.ConversationId, "read_file", "{}",
+            ToolExecutionStatus.Completed, "read", "call-0", null, now, now, MessageId: assistantId);
+        var activation = new ToolExecutionRecord(Guid.NewGuid(), request.ConversationId,
+            SkillRuntimeToolset.ActivateSkillToolName, "{\"skillId\":\"review\"}", ToolExecutionStatus.Completed,
+            "Activated Skill 'review'.", "call-1", null, now, now, MessageId: assistantId);
+        var assistant = new MessageRecord(
+            assistantId, request.ConversationId, earlier.TurnId, 2, MessageRole.Assistant, string.Empty,
+            MessageStatus.Sealed, now, now,
+            Segments:
+            [
+                new MessageSegmentRecord(assistantId, 0, MessageSegmentKind.ToolCall, null, probe.Id),
+                new MessageSegmentRecord(assistantId, 1, MessageSegmentKind.ToolCall, null, activation.Id)
+            ]);
+        IReadOnlyList<MessageRecord> messages = [earlier, assistant, request.Messages[1] with { Sequence = 3 }];
+        request = request with
+        {
+            Messages = messages,
+            Turns = PresentationHistory.Turns(messages),
+            ToolExecutions = [probe, activation],
+            // The boundary stops before the assistant message; only the anchor says how far into it the
+            // summary reaches.
+            Compression = new ConversationCompactionRecord(Guid.NewGuid(), request.ConversationId, earlier.TurnId, 1,
+                "summary", "model", 2, 10, 5, now,
+                ThroughToolRunId: anchoredOnActivation ? activation.Id : probe.Id)
+        };
+
+        await using var lease = await resolver.ResolveAsync(request, TextOnlyImages);
+        var list = (AIFunction)lease.Tools.Single(tool => tool.Name == SkillRuntimeToolset.ListSkillResourcesToolName);
+        var result = (await list.InvokeAsync(new AIFunctionArguments { ["skillId"] = "review" }))
+            .Should().BeOfType<DirectToolResult>().Subject;
+
+        result.Status.Should().Be(anchoredOnActivation ? ToolCallStatus.Failed : ToolCallStatus.Completed);
+    }
+
     [Fact]
     public async Task ResolveAsync_does_not_reactivate_a_historical_skill_for_a_no_input_continuation()
     {

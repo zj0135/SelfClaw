@@ -1,6 +1,6 @@
 # Direct 上下文自动压缩设计
 
-状态：设计冻结（v2）· 已完成（C1–C16 落地并审核通过）· 更新 2026-11-18（含图单元参与压缩；回合开始触发接入 provider 实测下限）
+状态：设计冻结（v2）· 已完成（C1–C16 落地并审核通过）· 更新 2026-11-24（C23：触发点与界面读数同口径、保留目标针对整个 prompt、分块摘要、回合内压缩落库（schema v33）、用量环显示触发点）
 配套实施文档：《direct-context-compaction-implementation-tasks.md》
 替代关系：本设计取代 `DirectPromptComposer`（现拆为 `DirectHistoryReplay` / `DirectSystemPrompt` / `DirectCompactionPlanner`）基于 UTF-8 估算的历史裁剪（`BuildHistoryWithinBudget`），并修订 `runtime-execution-flow.md` §5 的“token 预算仍是启发式估算”一段 —— 字节估算整体退场，计数改为离线 tiktoken 系 tokenizer 加 provider 回报的实测值。
 
@@ -8,6 +8,11 @@
 
 - **DP1 确认**：新增 `conversation_compactions` 表，schema v31 → v32；旧库按仓内既有策略只读拒绝、不迁移不回填。
 - **DP2 确认**：不再使用字节启发式估算。计数统一走 tiktoken 系 tokenizer（离线词表），并以 provider 回报的实测值校正与兜底。
+
+已确认决策（2026-11-24，C23）：
+
+- **触发点与界面读数同口径**：输出预留不再加到计数上，只作为触发点的封顶（§5.4）。
+- **回合内压缩落库**：`conversation_compactions` 增加锚点列 `through_tool_run_id`，schema v32 → v33；旧库同样只读拒绝、不迁移（§4.2）。
 
 ## 0. 结论摘要
 
@@ -61,15 +66,15 @@
 
 | 项 | 契约 |
 | --- | --- |
-| 触发 | 回合开始时，计数（或实测值）达到阈值即压缩一次；每回合最多一次 |
-| 阈值 | 默认 = 模型窗口 × 75%；模型未声明窗口时用绝对阈值（默认 64 000 tokens） |
-| 保留 | 压缩后保留最近历史，目标 ≤ 阈值 × 50%（常量，不开放设置） |
+| 触发 | 回合开始时，计数（或实测值）达到触发点即压缩一次；每回合最多一次 |
+| 触发点 | 默认 = 模型窗口 × 75%，封顶在 `(窗口 − 输出预留) × 90%`；模型未声明窗口时用绝对阈值（默认 64 000 tokens）。它与界面“当前上下文”是同一把尺：读数走到触发点就压缩 |
+| 保留 | 压缩后**整个 prompt**（system、工具定义、受保护消息都算在内）目标 ≤ 触发点 × 50%（常量，不开放设置） |
 | 压缩模型 | 未指定 → 当前回合模型；已指定 → 该模型（设置时校验为已启用） |
-| 摘要复用 | 摘要落库；下一回合只重放边界之后的消息，并把摘要作为运行时上下文注入 |
+| 摘要复用 | 摘要落库；下一回合只重放边界之后的内容，并把摘要作为运行时上下文注入。回合内压缩同样落库（边界可以落在 assistant 消息内部，§4.1） |
 | 转录提示 | 出现 `上下文压缩` 分隔项，副标题显示被压缩消息数与 token，可展开摘要正文 |
 | 关闭压缩 | 不再裁剪历史；若计数超过模型窗口，回合以可读错误失败（提示开启压缩），不静默丢历史 |
 | 计数失败 | 本回合关闭压缩并给出诊断；**不回落字节估算**，也不因计数失败使回合失败 |
-| 用量显示 | 输入框状态栏显示 `上下文 <当前>/<窗口>` 与 `累计 输入/输出`；数值来自 provider 实测，计数近似值加 `~` 前缀区分 |
+| 用量显示 | 输入框用量环显示 `当前上下文 / 窗口` 的占比，弹层给出 `累计 输入/输出`；数值来自 provider 实测，计数近似值加 `~` 前缀区分。启用压缩时环与进度条上各有一道**触发点刻度**（§8.3） |
 
 适用范围：本机制对**所有 Direct 回合**生效（Interactive / Subagent / Continuation / Automation 各自用自己的会话历史）；CLI 回合不参与（CLI 自持上下文）。
 
@@ -96,7 +101,8 @@ public sealed record ConversationCompactionRecord(
     int SourceMessageCount,
     int? SourceTokens,
     int? SummaryTokens,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    Guid? ThroughToolRunId = null);   // 回合内压缩的锚点：边界之后那条 assistant 消息里，摘要覆盖到的最后一次工具调用
 ```
 
 `TurnUsage` 增加一个可选字段（与 v32 同批落地）：
@@ -109,11 +115,17 @@ public sealed record TurnUsage(
 
 它是“本回合最后一次 provider 请求的输入 token 数”，即真实上下文规模，用于两处：触发判定下限、界面“当前上下文大小”的首选来源。`ContextTokens`（input+output）保留原语义不动。
 
-`ThroughSequence` 是压缩边界的唯一真值：重放 = 摘要 + `sequence > ThroughSequence` 的消息。不用“最新压缩项之前的一切”这类位置推断，因为压缩发生在当前回合中途，当前回合更早的消息必须保留。
+压缩边界由两个字段共同表达，重放 = 摘要 + 边界之后的内容：
 
-### 4.2 Schema v32
+- `ThroughSequence`：`sequence ≤ ThroughSequence` 的消息**整条**被摘要代表。不用“最新压缩项之前的一切”这类位置推断，因为压缩发生在当前回合中途，当前回合更早的消息必须保留。
+- `ThroughToolRunId`（可空，v33）：一个回合的全部 assistant 输出存成**一条**消息，回合内压缩的边界几乎总落在这条消息中途，消息粒度表达不了。锚点指向该消息里摘要覆盖到的**最后一次工具调用**：它与它之前的调用都由摘要代表，只重放它之后的部分。锚点所在消息的 sequence 恒大于 `ThroughSequence`，所以只认 `ThroughSequence` 的读者（排序、转录分隔项定位、`Compose` 的整消息过滤）不需要知道锚点。
+- 锚点是**软引用**（不建外键，与 `through_sequence` 一样）：解析不到（工具记录不在、段落里找不到）就当作没有锚点，后果只是多重放一些摘要里已有的内容，绝不丢历史；压缩记录也不会因此让回合提交失败。
 
-一次版本变更同时落地新表与 `turn_usage` 新列（其余表不变；沿用“拒绝而非迁移”的既有做法，旧库只读拒绝）：
+“某次工具调用是否已被摘要覆盖”只有一个判定入口 `DirectHistoryReplay.IsCovered(messages, run, compression)`：消息在边界之前，或消息就是锚点所在消息且该调用的段序号不晚于锚点。任务计划快照（`DirectCompactionStep.TodoSection`）与技能激活是否仍在重放（`SkillCapabilitySource.FindReplayedActivations`）都走它，不得各自按整消息粒度判断。
+
+### 4.2 Schema v32 → v33
+
+v32 一次落地新表与 `turn_usage` 新列（其余表不变；沿用“拒绝而非迁移”的既有做法，旧库只读拒绝）。v33（C23）只在这张表上加一列可空的 `through_tool_run_id`，同样不写迁移：v32 库启动即被只读拒绝，文件不被修改。当前建表语句：
 
 ```sql
 CREATE TABLE conversation_compactions (
@@ -127,6 +139,7 @@ CREATE TABLE conversation_compactions (
     source_tokens INTEGER NULL,
     summary_tokens INTEGER NULL,
     created_at_utc TEXT NOT NULL,
+    through_tool_run_id TEXT NULL,   -- v33；软引用，不建外键
     FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
     FOREIGN KEY(turn_id) REFERENCES conversation_turns(id) ON DELETE CASCADE
 );
@@ -134,7 +147,14 @@ CREATE INDEX ix_conversation_compactions_conversation
     ON conversation_compactions(conversation_id, created_at_utc DESC);
 ```
 
-`turn_usage.last_request_input_tokens` 是**目标建表语句里的一列**（无 `ALTER`、无回填、无缺列回退），因为旧库整体被拒绝。`SqliteSchema.RequiredTables` 增加 `conversation_compactions`，`CurrentSchemaVersion` 31 → 32，`AGENTS.md` 不变量 10 与 12 的版本号同步（首轮实施已完成）。
+`turn_usage.last_request_input_tokens` 是**目标建表语句里的一列**（无 `ALTER`、无回填、无缺列回退），因为旧库整体被拒绝。`SqliteSchema.RequiredTables` 增加 `conversation_compactions`，`CurrentSchemaVersion` 31 → 32（首轮实施）→ 33（C23）；`SqliteDatabase` 的拒绝文案引用该常量而不是写死版本号，`AGENTS.md` 的版本号随之同步。
+
+想保留 v32 的现有数据，可以在应用关闭时对**备份副本**手工执行下面两句（不属于应用代码，应用永远不做迁移）：
+
+```sql
+ALTER TABLE conversation_compactions ADD COLUMN through_tool_run_id TEXT NULL;
+UPDATE schema_versions SET version = 33;
+```
 
 ### 4.3 承载与读取
 
@@ -155,6 +175,7 @@ CREATE INDEX ix_conversation_compactions_conversation
 - `SqliteConversationTurnWriter.TryWriteAsync` 在同一事务内 `INSERT ... ON CONFLICT(id) DO UPDATE`（重试幂等），并校验会话/回合归属、`Summary` 非空、`ThroughSequence >= 0`、`SourceMessageCount >= 0`。
 - 交互回合：`ConversationTurnRecorder` 收到压缩完成事件后写入 live state（分隔项立即可见），终态提交时落库。
 - child / continuation 回合：走同一 writer（continuation 的 detached 回合在 `SubagentContinuationTurnCommitter` 的原子事务里一并提交），不新增第二条写入路径。
+- 回合内压缩的记录走的也是这条路径（`direct-in-turn-compaction-design.md` §5.3）：一个回合只有**一个**回合内记录 id，同回合后续的回合内压缩在 `PendingCompactions` 里按 id 替换，upsert 连 `through_tool_run_id` 一起更新。writer 额外拒绝 `ThroughToolRunId == Guid.Empty`。
 
 写入与读取的两条细则（首轮实施已按此落地）：
 
@@ -197,18 +218,34 @@ CREATE INDEX ix_conversation_compactions_conversation
 ```text
 window        = AiChatOptions.ResolveContextWindowTokens(profile)          // 可能为 null
 outputReserve = options.MaxOutputTokens ?? DefaultOutputTokenReserve(4096)
-threshold     = window is int w ? (int)(w * policy.ThresholdRatio) : policy.AbsoluteThresholdTokens
-promptTokens  = Count(system + 全部可重放历史 + tools)                     // tokenizer；**不含**输出预留，界面“上下文大小”同口径
+trigger       = window is int w
+                  ? max(0, min(w * policy.ThresholdRatio, (w - outputReserve) * UsableInputShare(0.9)))
+                  : policy.AbsoluteThresholdTokens                          // DirectCompactionPlanner.ResolveTrigger，唯一公式
+promptTokens  = Count(system + tools + 全部可重放历史 + 受保护尾部)        // tokenizer；**不含**输出预留，界面“上下文大小”同口径
 observed      = 紧邻上一回合（须为 Direct 回合）的 turn_usage.last_request_input_tokens（可能为 null）
-triggerTokens = max(promptTokens + outputReserve, observed ?? 0)           // 预留落在触发侧：宁可早压，也不要在小窗口下压完仍超窗
+触发：max(promptTokens, observed ?? 0) ≥ trigger
 ```
 
-- 取两者较大值：tokenizer 受编码匹配度影响，实测值受“上一次请求内容与本次不同”影响；取大更保守，宁可早压不可超窗。本地计数对图片只计一个常数（`PerImageTokens`），实测下限正是它偏低时的校正：界面读数（实测）过了阈值，下一回合就压缩。
+- **触发点与界面读数是同一把尺**（C23）。输出预留不加到计数上，只通过 `(window − outputReserve) × 0.9` 给触发点封顶：触发点永远不高于“还放得下一次完整输出”的位置，而用户配置的比例在绝大多数模型上原样生效。旧公式是 `promptTokens + outputReserve ≥ window × ratio`，对最大输出占窗口很大一块的模型，实际触发点远低于配置比例，还低于压缩后的保留量，于是压完立刻又满足触发条件（根因与实测数字见实施文档 C23）。
+- `UsableInputShare = 0.9`：本地计数比 provider 实测低几个百分点（tokenizer 不同、协议帧开销），触发点贴着硬上限会放行一个 provider 必然拒绝的请求。
+- 受保护尾部（continuation 的 completion batch，≤ 64 KiB）计入 `promptTokens`：`DirectTurnPreparer` 只构建一次，计数和发送用的是同一份，被计数的 prompt 就是被发送的 prompt。
+- `observed` 与本地计数取较大值：tokenizer 受编码匹配度影响，实测值受“上一次请求内容与本次不同”影响；取大更保守，宁可早压不可超窗。本地计数对图片只计一个常数（`PerImageTokens`），实测下限正是它偏低时的校正：界面读数（实测）过了触发点，下一回合就压缩。
 - `observed` 只取**紧邻的上一回合**，且该回合必须是 Direct 回合：它是那一回合最后一次 provider 请求的输入规模，也就是界面显示的上下文大小。**不向更早的回合回溯**：更早的实测值可能早于现有压缩边界，会让已经压过的会话再压一次。上一回合没有上报（未发出请求即失败）或是 CLI 回合（它实测的是 CLI 自己的会话，不是 Direct 重放的 prompt）时没有下限，判定只看本地计数。数据来自请求已携带的 `Turns`，不新增 SQL。
 - `observed` 只决定“要不要压”，不决定“压多少”：前缀与保留仍按本地单元计数切分（§5.6）。实测值可能高于本回合真实 prompt（上一回合最后一次请求里有不再重放的内容），此时若全部单元都落在保留目标内，规划直接拒绝，不产生模型调用。`ContextCompactionStartedEvent.EstimatedTokens` 也仍是本地计数（§8.1）。
-- 回合内检查点也有自己的实测下限，但来源不同（`direct-in-turn-compaction-design.md` §3.2）：它用的是**本回合上一次请求**的实测输入，不是这里的 `observed`（上一回合的最后一次请求）。
-- `policy.Enabled == false` → 不压缩、不裁剪；`promptTokens + outputReserve > window` 时抛可读错误（`InvalidDataException`）：说明历史超出模型窗口、提示开启压缩或换更大窗口的模型。
+- 回合内检查点调用同一个 `ResolveTrigger`，也有自己的实测下限，但来源不同（`direct-in-turn-compaction-design.md` §3.2）：它用的是**本回合上一次请求**的实测输入，不是这里的 `observed`（上一回合的最后一次请求）。
+- **窗口校验不变**，仍是 `promptTokens + outputReserve ≤ window`：`policy.Enabled == false` → 不压缩、不裁剪，超窗时抛可读错误（`InvalidDataException`），说明历史超出模型窗口、提示开启压缩或换更大窗口的模型。触发点恒不高于可用输入，所以“先压缩、再校验”的顺序保证不变。
 - 压缩后重算：**必须把新的 system 段（含摘要 section）算进去**，若仍 `promptTokens + outputReserve > window` → 抛同类错误（压缩没能解决，不静默发送超限请求）。
+
+各配置下的触发点（比例 0.5）：
+
+| 窗口 / 最大输出 | 旧公式的实际触发点 | 现在的触发点 | 压完约 |
+| --- | --- | --- | --- |
+| 1,048,576 / 384,000 | 140,288（13.4%） | 524,288（50%） | 25% |
+| 1,000,000 / 393,216 | 106,784（10.7%） | 500,000（50%） | 25% |
+| 1,048,576 / 65,536 | 458,752（43.7%） | 524,288（50%） | 25% |
+| 未声明窗口 | 绝对阈值 − 输出上限 | 绝对阈值 | 一半 |
+
+封顶何时生效：最大输出 384,000、窗口 1,048,576 的模型可用输入只有约 664K，比例高于约 0.57 时触发点停在 598K；想用满窗口只能调低该模型的最大输出。
 
 ### 5.5 计数不可用时的降级
 
@@ -222,12 +259,15 @@ tokenizer 初始化失败（数据包缺失、程序集不匹配等，**按编�
 ### 5.6 保留策略（常量，不进设置）
 
 ```text
-keepTarget = threshold * 0.5           // RetainedContextRatio
+fixedTokens = max(0, promptTokens - Σ候选单元 token)        // 摘要替换不掉的部分：system（含旧摘要）、tools、受保护消息
+keepTarget  = max(0, trigger * 0.5 - fixedTokens)           // RetainedContextRatio，针对整个 prompt
 保留最新单元直到累计计数 ≤ keepTarget；至少保留最新 1 个单元
 其余更旧单元组成待压缩前缀 prefix
 prefix 为空 → 不压缩（无可压缩内容）
 throughSequence = prefix 最后一个单元对应的消息 sequence
 ```
+
+保留目标针对**整个 prompt**而不是历史本身（C23）：压完之后的 prompt 约为触发点的一半，距离下一次触发留有另一半的增长空间。旧公式 `keepTarget = threshold × 0.5` 只量历史单元，固定开销大的时候压完的 prompt 仍然贴着触发点。由此得到一条可测的不变量：**对规划结果应用后再规划一次，必须拒绝**（不会立刻重触发）。唯一的例外是“最新单元必留”：它独自超过保留目标时仍然保留，此时由窗口校验兜底。
 
 没有不可压缩的单元类型：含图单元（用户附件、读图的工具往返）与普通单元同等进入候选集与前缀，图片在摘要请求里换成文本占位（§6 规则 2）。把含图单元排除在规划之外的两种做法都不可行，理由见 `input-attachment-design.md` §2 第 2 条。
 
@@ -262,7 +302,7 @@ internal sealed class DirectContextCompressor
 
 三条语义钉死（否则实现会各写各的）：
 
-- `SourceTokens` 是**被压缩前缀自身**的 token 数（由 `PlanCompression` 累加前缀单元得到），不是整个 prompt 的计数。`MaxOutputTokens` 的 `/4` 与界面“压缩前 token”都以它为准。
+- `SourceTokens` 是**被压缩前缀自身**的 token 数（由 `PlanCompression` 累加前缀单元得到），不是整个 prompt 的计数。输出预算的 `/4` 与界面“压缩前 token”都以它为准。
 - `SourceMessageCount` 是**会话消息条数**（= `PrefixUnits.Count`）：一个单元对应一条 `MessageRecord`，而单元内部的工具调用与结果会被展开成多条 `ChatMessage`，按 `unit.Messages.Count` 求和会虚高，界面数字也会与边界语义不符。
 - `SummaryTokens` 由压缩器用实际产出摘要的那个 lease 的 `Profile`（经 `IDirectTokenCounter`）算出，计数不可用时为 null。界面“压缩前 → 压缩后”的后半靠它，不能恒为 null。
 
@@ -270,13 +310,19 @@ internal sealed class DirectContextCompressor
 
 1. **模型解析**：`ModelProfileId` 非空 → `IAiChatClientFactory.PrepareAsync(id)` + `Create(preparation, new AiChatClientPipelineOptions([]))`，用完释放 lease；为空 → 复用本回合 `AiChatClientLease.Client`（同一 HTTP 客户端，另传一次 `ChatOptions`，不携带工具）。指定模型不可用（禁用/删除）→ 回退到本回合模型、置 `UsedFallbackModel = true`，由 C7 据此发一条诊断 `RunStatusEvent`，不失败回合。
 2. **输入构造**：`[system: DirectCompressionInstruction]` +（有旧摘要时）`[user: <selfclaw-context-summary version="1">…</>]` + 前缀单元的原始 `ChatMessage` 序列（角色、工具调用与结果原样保留，单元边界保证调用/结果成对）。唯一的改写是图片：顶层 `DataContent`、tool result 内嵌的图片与 follow-up user 消息里的图片一律换成 `[image: name]` 文本（`PlaceholderizeAttachments`）。压缩模型不一定支持图片，原图也会撑爆它自己的窗口；含图单元和普通单元一样进入前缀，所以这是摘要请求不含二进制的唯一保证。
-3. **输出约束**：`ChatOptions { MaxOutputTokens = clamp(sourceTokens / 4, 512, 4096) }`，其中 `sourceTokens` 为**待压缩前缀自身**的计数（由 `PlanCompression` 传入，不是整个 prompt 的计数）；其余采样走模型/provider 默认。空或全空白响应视为失败。
-4. **失败降级**：单次尝试、不重试（回合内上限 `MaximumCompactionAttemptsPerTurn = 2`，含回退后的重试）；失败只记录日志并发 `ContextCompactionFailedEvent`，回合继续按未压缩上下文发送；若因此超过窗口，由 §5.4 的错误路径给出可读失败，**绝不静默裁剪**。
-5. **摘要指令**（固定文案）要求保留：用户目标与约束、已确认的决定、涉及的文件路径与命令、未完成事项与已知错误、关键结论；丢弃寒暄、重复与已被推翻的中间尝试；不得引入新事实；使用简洁书面语，可用列表。图片以 `[image: name]` 占位出现：要求保留其文件名 / 路径与会话里已得出的结论，并写明图片本身已不在会话中（模型据此知道要再看得重新读取或请用户重发）。
+3. **输出约束**：`ChatOptions { MaxOutputTokens = clamp(previousSummaryTokens + sourceTokens / 4, 512, 4096) }`，其中 `sourceTokens` 为**待压缩前缀自身**的计数（由 `PlanCompression` 传入，不是整个 prompt 的计数），`previousSummaryTokens` 是旧摘要按产出模型的计数（不可用时按 0）。旧摘要必须算进预算（C23）：链式压缩要先把旧摘要的全部内容带过去才谈得上新增，只按新前缀定预算时，一个小前缀会把累积的摘要整体挤过 512 的下限，模型逐次失忆（实测摘要从 240 缩到 118 tokens，同时还要吸收 5.6K 新内容）。其余采样走模型/provider 默认。空或全空白响应视为失败。
+4. **分块链式摘要**（C23）：前缀超过摘要模型自己的可用输入时切成多块，上一块的摘要作为下一块的 `PreviousSummary`。
+   - 何时会用到：经历过回合内压缩的回合，存下来的那条 assistant 消息可以比一个窗口还大；它的锚点一旦失效（§4.1），下一回合就要把整条消息交给摘要模型，单次请求必然失败，而摘要失败 + 窗口校验会让这个会话再也开不了新回合。
+   - 块预算 = `(window − 2 × MaximumSummaryTokens) × UsableInputShare − 指令 token`，窗口取**产出摘要的模型**的声明值：留出回答与每一块都要携带的旧摘要。
+   - 切分点只能落在非 `ChatRole.Tool` 消息之前，调用与结果永不分离；单条消息自身超预算时仍整条发送（不裁剪）。
+   - 摘要模型未声明窗口、计数不可用、或整体放得下时仍是**单次请求**（即原有行为）。
+   - 任一块失败则整体返回 null，不应用任何部分结果：半个前缀的摘要等于悄悄丢掉另一半。
+5. **失败降级**：单次尝试、不重试；失败只记一条 warning（含会话 / 回合 id，不含正文）并发 `ContextCompactionFailedEvent`，回合继续按未压缩上下文发送；若因此超过窗口，由 §5.4 的错误路径给出可读失败，**绝不静默裁剪**。
+6. **摘要指令**（固定文案）要求保留：用户目标与约束、已确认的决定、涉及的文件路径与命令、未完成事项与已知错误、关键结论；丢弃寒暄、重复与已被推翻的中间尝试；不得引入新事实；使用简洁书面语，可用列表。图片以 `[image: name]` 占位出现：要求保留其文件名 / 路径与会话里已得出的结论，并写明图片本身已不在会话中（模型据此知道要再看得重新读取或请用户重发）。
 
 ## 7. Prompt 组装
 
-`DirectPromptComposer`（现为 `DirectCompactionPlanner.PlanCompression` 与 `DirectHistoryReplay.BuildUnits` / `Compose`、`DirectSystemPrompt.BuildSystemText`）拆成两个纯函数（均无 I/O）：
+`DirectPromptComposer`（现为 `DirectCompactionPlanner.PlanCompression` 与 `DirectHistoryReplay.BuildUnits` / `Compose`、`DirectSystemPrompt.BuildFixedText` / `ComposeSystemText`）拆成纯函数（均无 I/O）：
 
 ```csharp
 // 规划：是否需要压缩、压缩哪个前缀（DirectCompactionPlanner）
@@ -285,22 +331,26 @@ internal DirectCompressionPlan PlanCompression(
     ConversationCompactionRecord? existing,
     DirectCompressionPolicy policy,
     DirectPromptBudget budget,
-    int? countedTokens);        // §5.4 的 promptTokens，由调用方传入；null = 计数不可用
+    int? countedTokens,         // §5.4 的 promptTokens，由调用方传入；null = 计数不可用
+    int? observedTokens = null);
 
-// 组装：摘要 section + 边界之后的历史 + 必需消息（`tools` / `countedTokens` / `budget` 三个参数都已删除：
+// 组装：边界之后的历史 + 必需消息（`tools` / `countedTokens` / `budget` 三个参数都已删除：
 // 计数与窗口校验都归调用方，composer 不读窗口）。原 BuildMessages 已删除，现为 DirectHistoryReplay.Compose
 internal static DirectPromptBuild Compose(
-    units, systemText, trailingProtectedMessages, ConversationCompactionRecord? compression);
+    units, fixedSystemText, trailingProtectedMessages, ConversationCompactionRecord? compression);
 
-// 供调用方计数用（composer 自己不计数）
-internal static IReadOnlyList<DirectPromptHistoryUnit> BuildUnits(...);          // DirectHistoryReplay
-internal static string? BuildSystemText(..., ConversationCompactionRecord? compression);  // DirectSystemPrompt
+// 供调用方计数用（composer 自己不计数）。compression 的锚点在这里把所在消息截短
+internal static IReadOnlyList<DirectPromptHistoryUnit> BuildUnits(..., ConversationCompactionRecord? compression = null);  // DirectHistoryReplay
+internal static string? BuildFixedText(agentInstructions, systemInstructions, executionContext);                         // DirectSystemPrompt
+internal static string? ComposeSystemText(string? fixedText, string? summary, string? planSection);                      // DirectSystemPrompt
 ```
 
 规则：
 
-- **重放边界**：只重放 `Sequence > compression.ThroughSequence` 的可重放消息；更旧的被摘要代表。
-- **摘要注入**：作为独立 system section 追加在 agent instructions 之后，包裹在 `<selfclaw-context-summary version="1">…</selfclaw-context-summary>` 中，并附一行说明“这是更早对话的压缩摘要，替代已省略的历史”。放在 system 段而不是 user 消息：它是运行时提供的上下文，不是用户输入（与 `CompletionInstruction` 先例一致）。⚠ 最终顺序（C6 定）：agent instructions → `CompletionInstruction`（有 completion batch 时）→ 压缩摘要 → capability system instructions（Plugin/Skill/Policy/Degradation）；摘要排在 completion 指令之后、能力指令之前，这样无压缩时 prompt 字节布局与旧实现完全一致。
+- **重放边界**：只重放 `Sequence > compression.ThroughSequence` 的可重放消息；更旧的被摘要代表。压缩记录带锚点时，`BuildUnits` 在重建锚点所在的 assistant 消息时走到锚点工具调用就清空已累积的内容，只留其后的部分；锚点按**段**匹配而不是按可重放的工具记录匹配，所以锚点调用自己没有到达终态时切点不变。截完为空的消息不产生单元。
+- **摘要注入**：作为独立 system section，包裹在 `<selfclaw-context-summary version="1">…</selfclaw-context-summary>` 中，并附一行说明“这是更早对话的压缩摘要，替代已省略的历史”。放在 system 段而不是 user 消息：它是运行时提供的上下文，不是用户输入（与 `CompletionInstruction` 先例一致）。
+- **一个请求只有一个摘要 section**（C23）。system 文本的顺序固定为：**固定文本**（agent instructions → 有 completion batch 时的 `CompletionInstruction` → capability system instructions）→ **摘要** → **任务计划**。摘要与计划是仅有的两段回合内会变的内容，放在固定文本之后，固定文本因此在整个回合里逐字节不变（provider 的前缀缓存不被摘要更新打断）；无压缩时的字节布局与旧实现一致。不论摘要来自已落库的记录、回合开始压缩还是回合内压缩，它都是同一个 section：回合内压缩把请求当前的摘要作为 `PreviousSummary` 折进新摘要并**替换**它。这是落库的前提——一条记录的摘要必须能独立代表边界之前的一切。旧布局（回合开始的摘要在能力指令之前、回合内摘要追加在末尾、两者并存）已删除。
+- 计数与发送共用 `ComposeSystemText`：`DirectCompactionStep` 用它算 `promptTokens`，`DirectConversationContext.Recompose` 用它生成请求里的 system 消息，被计数的文本就是被发送的文本。
 - **裁剪移除**：`BuildHistoryWithinBudget` 与“最新消息装不下就丢弃其余”的路径删除。
 - **保留的必要校验**：`counted(system + tools) + outputReserve > window` → 抛既有可读错误（这条与用户历史无关，属于配置错误）；计数不可用时跳过该检查（fail-open），由 provider 报错。⚠ 落地归属（C7 定）：这条检查的唯一归属是 **`DirectCompactionStep`**（`EnsureTurnStartPromptFitsWindow`，文案要带“开启压缩 / 降低输出上限 / 换更大窗口”的指引），composer **不再重复同一条校验**——`DirectTurnPreparer` 用同一份计数在 `Compose` 之前先跑，composer 里那份永远不可达，属重复实现（AGENTS 约定 10）。composer 只保留与计数无关的校验（completion batch 的 64 KiB 上限、历史顺序与归属校验）。
 - completion batch、steer 批次的语义与顺序不变。
@@ -318,9 +368,12 @@ internal static string? BuildSystemText(..., ConversationCompactionRecord? compr
 public sealed record ContextCompactionStartedEvent(int EstimatedTokens, int ThresholdTokens) : AgentStreamEvent;
 public sealed record ContextCompactionCompletedEvent(ConversationCompactionRecord Compaction) : AgentStreamEvent;
 public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEvent;
+public sealed record ContextCompactionTriggerResolvedEvent(int TriggerTokens) : AgentStreamEvent;   // C23
 ```
 
-`Started` 的两个数字口径：`EstimatedTokens` = `promptTokens`（与界面“上下文大小”同口径，不含输出预留），`ThresholdTokens` = `threshold`（窗口 × 比例，或模型未声明窗口时的绝对阈值）。
+`Started` 的两个数字口径：`EstimatedTokens` = `promptTokens`（与界面“上下文大小”同口径，不含输出预留），`ThresholdTokens` = `trigger`（§5.4 的触发点，`DirectCompressionPlan.ThresholdTokens` 承载的也是它）。两者同口径，可以直接比较。
+
+`TriggerResolved` 只服务用量环：`DirectTurnPreparer` 读到策略后，若 `policy.Enabled` 就发布本回合的触发点（与 `Started.ThresholdTokens` 是同一个 `ResolveTrigger` 的结果）。压缩关闭的回合与 CLI 回合不发。它只存内存、不落库（§8.3）。
 
 `AgentRunStatus` 追加 `Compacting = 4`；`ConversationTurnRecorder.MapRunStatusText` 映射为“正在压缩上下文…”，`AgentActivityCoordinator.MapRunStatus` 映射为 `(Thinking, "正在压缩上下文")`。
 
@@ -331,17 +384,22 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 - `Started`：`session.ActivityText` 更新 + 立刻发布。
 - `Completed`：写入 `AgentTurnState.PendingCompactions` 并 `session.ReplaceCompaction(record)`，`RaiseTranscriptChanged(true)`（分隔项立即可见）。
 - `Failed`：只写日志与活动文案，转录不出现误导性提示。
+- `InTurnContextCompactionCompletedEvent`：事件带记录时，把 `AnchorCallId` 经 `turn.ToolRunsByCallId` 解析成落库的 tool run id 写进记录（解析不到就不带锚点），在 `PendingCompactions` 里按 id 替换，`session.ReplaceCompaction` 后立即发布；不带记录时只记日志（`direct-in-turn-compaction-design.md` §5.3）。
+- `TriggerResolved`：写入瞬态的 `ConversationRuntimeState.CompactionTriggerTokens` 并 `RaiseTranscriptChanged(false)`。
 
 ### 8.3 投影
 
 - 新增渲染项：`TranscriptRenderItem(Kind: "compression", Role: "system", Status: "sealed", …)`，载荷 `TranscriptCompactionNotice(CompactionId, MessageCount, SourceTokens, SummaryTokens, Model, Summary)`。
-- 排序规则：插入到 `sequence == ThroughSequence` 的消息项之后；多项按 `ThroughSequence` 升序，同值按 `CreatedAtUtc`。
-- 用量摘要：`TranscriptProjection` 从 `request.Turns` + `request.LiveUsage` 计算 `TranscriptUsageSummary(long InputTokens, long OutputTokens, int? ContextTokens, int? ContextWindowTokens, bool ContextIsEstimated)`：
+- 排序规则：插入到 `sequence == ThroughSequence` 的消息项之后；多项按 `ThroughSequence` 升序，同值按 `CreatedAtUtc`。回合内压缩的记录一旦覆盖到本回合自己的输出，它的 `ThroughSequence` 就是回合开始时已落库的最大 sequence，分隔项因此显示在**该回合用户消息之后**，同一回合压多少次都只有这一条；`MessageCount` 取被覆盖的存储消息数，部分覆盖的那条 assistant 消息计 1。
+- 用量摘要：`TranscriptProjection` 从 `request.Turns` + `request.LiveUsage` + `request.CompactionTriggerTokens` 计算 `TranscriptUsageSummary(long InputTokens, long OutputTokens, int? ContextTokens, int? ContextWindowTokens, bool ContextIsEstimated, long? CachedInputTokens, int? CompactionTriggerTokens)`：
   - 累计输入/输出 = 本会话所有回合 `Usage` 求和（子代理用量不并入）。
   - 当前上下文 = 最新非空 `LastRequestInputTokens`（实测）→ 缺失时用最新非空 `ContextTokens` 并置 `ContextIsEstimated = false`（同为实测口径）→ 都没有时置空，由前端显示不可用。
   - 运行中的回合还带一份实时快照（`UsageProgressEvent` → `ConversationRuntimeState.LiveUsage`）：它**替换**该回合已落库的 `Usage`，因为边界提交可能写过同一累加器的更早快照，相加会重复计数；快照缺少的分项保留落库值。只有快照的 `IsEstimated` 为 true（本地计数）时 `ContextIsEstimated` 才置 true，前端据此显示 `~` 与近似说明。
   - 该字段放入 `TranscriptRenderState`，`replaceState` 与 `patchState` 载荷都要带。
-  - ⚠ 界面数字与压缩触发阈值**不是同一口径**：界面“当前上下文大小”是不含输出预留的 prompt 实测值，触发判定用的是 `promptTokens + outputReserve`（§5.4）。`ContextCompactionStartedEvent.EstimatedTokens` 与界面同口径，因此两者可以并列显示，但**不要**做“距离阈值还差多少”的对比展示（会少算一个输出预留）。
+  - **触发点刻度**（C23，取代原先“不要做距离阈值对比”的警告）：`CompactionTriggerTokens` 与 `ContextTokens` 同口径（§5.4），所以界面可以直接把它画成刻度——读数走到刻度就压缩。口径一致之前这做不到：旧触发判定多加一个输出预留，界面上看不出离压缩还有多远，这正是 C23 的用户现象之一。
+    - 触发点由宿主算好下发，**前端不复制公式**。
+    - 只存内存：运行中的回合取 `ConversationRuntimeState.CompactionTriggerTokens`；回合结束后 `ConversationSessionCoordinator` 按会话缓存上一回合的值（`_selectionGate` 保护，`ForgetTranscript` 时清除），所以回合之间刻度仍在。没解析出触发点的回合（压缩关闭、CLI 回合）会清掉缓存，而不是留下更早回合的值。schema 不为它改动。
+    - 时效：改了压缩设置后刻度的位置要到下一回合才更新；应用重启后要等该会话跑过一个回合才出现。关闭压缩例外——前端订阅了 `direct-compression/state`，开关一关刻度立即消失（§8.4）。
 
 ### 8.4 Vue
 
@@ -351,14 +409,18 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 | `views/ChatView.vue` / `components/chat/TranscriptPanel.vue` | `item.kind === 'compression'` 分支（与 `turn-outcome` 同级） |
 | `renderers/pluginTranscript.js` | 新 kind 的容忍路径（超限时退化为带元数据的精简项，不崩、不误当正文） |
 | `composables/useChatTranscript.js` | state 增加 `usage` |
-| `components/chat/composer/ComposerStatusBar.vue` | 右侧渲染用量（`上下文 12.4k / 32k · 累计 输入 1.24M · 输出 342k`）；窄屏只留上下文 |
-| `renderers/usageMeter.js`（新） | `formatTokenCount` / `formatContextUsage` / `formatCompressionNotice` 纯格式化；设置页与输入框状态栏共用同一份缩写 |
+| `components/chat/composer/ComposerUsageMeter.vue` | 输入框工具行里的用量环（占比 + 色调）与弹层的开合、定位；启用压缩且已知触发点时在环上画一道径向刻度 |
+| `components/chat/composer/ComposerUsagePopover.vue`（C23 拆出） | 弹层内容与样式：当前上下文 / 上限、缓存命中率、进度条（含触发点标记）、`自动压缩 524.29K 50%` 一行、会话累计 |
+| `composables/useCompressionThreshold.js` | 订阅 `direct-compression/state`，暴露绝对阈值（无窗口模型的进度上限）与 `enabled`（关闭时不画刻度） |
+| `renderers/usageMeter.js`（新） | `formatTokenCount` / `calculateUsageProgress` / `ringTick` / `formatCompressionNotice` 纯格式化与几何；设置页与输入框共用同一份缩写 |
 
 格式化口径（C13/C14 定，均在这个 renderer 里，不在组件里）：
 
 - `formatTokenCount`：≥ 1M 用 `M`、≥ 1K 用 `K`，最多两位小数且不带千位分隔；已是 `32K` / `1.2M` 形态的字符串原样返回；未知与非正值返回 `—`。量级按**格式化之后**回判（999999 四舍五入成 `1000` 时必须进位为 `1M`，不得输出 `1000K`）。
-- 累计输入/输出：未知或为 0（尚无回合）整段省略，不渲染一排破折号。
-- 上下文：尺寸或窗口未知时整块显示 `不可用` 而不给数字；`contextIsEstimated` 只为尺寸加 `~` 并附 `由本地计数近似` 提示，窗口是模型声明值，不加 `~`；窄屏只保留上下文尺寸。
+- 累计输入/输出：未知时显示 `—`。
+- 上下文：尺寸未知时显示 `不可用` 而不给数字；`contextIsEstimated` 只为尺寸加 `~` 并附近似说明，窗口是模型声明值，不加 `~`。
+- **色调**（C23）：已知触发点时按 `当前上下文 / 触发点` 上色——≥ 85% 为 warm、≥ 100% 为 critical，表达的是“离下一次压缩还有多远”；触发点未知或压缩关闭时退回按窗口饱和度上色（65% / 85%）。
+- **触发点刻度**（C23）：只在模型声明了窗口且触发点小于窗口时画（环上的径向刻度、进度条上的标记、弹层里的 `自动压缩` 行三者同现同隐）。没有声明窗口时进度的上限本身就是绝对阈值，再画一道刻度只是重复，但色调仍按触发点算。
 - **缓存命中率**（C21）：`cachedInputTokens / inputTokens` 的百分比，最多一位小数，只在上下文尺寸那一行的右侧以纯数字加 `%` 呈现，不加标签文字。缓存量或输入量为空/为零时整个不渲染——`0%` 与"未上报"是两种不同的意思，不能混为一谈；超过 100% 时 clamp 到 `100%`（provider 分项与总数口径不一时不至于显示荒谬值）。数据来自 `TranscriptUsageSummary.CachedInputTokens`，按回合求和，与它所隶属的 `InputTokens` 同口径。
 - **不再有 `按模型声明的上下文窗口计算` 这种说明行**（C21 删除）：窗口含义已由行内的 `上下文窗口` / `绝对阈值` 标签表达，重复解释只增加视觉噪声。
 - 压缩分隔项：副标题四态（源+摘要 / 只有源 / 只有摘要 / 只有消息数）；无摘要时退化为非交互行且不给 `aria-expanded`；`Model` 进 `title`，摘要走 `renderMarkdown` 后再注入。
@@ -406,11 +468,11 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 | ID | 不变量 |
 | --- | --- |
 | C01 | 任何路径都不得静默丢弃用户可见历史：要么完整发送，要么压缩并有可见提示 |
-| C02 | 压缩边界是已持久化消息的 sequence；被摘要的消息不再单独重放 |
+| C02 | 压缩边界是已持久化消息的 sequence，外加可选的工具调用锚点（§4.1）；被摘要的内容不再单独重放。锚点失效只会多重放，不会少重放 |
 | C03 | 压缩项与回合终态在同一事务提交；重试幂等，不产生重复边界 |
 | C04 | 压缩失败不影响回合终态语义；超窗时以可读错误失败 |
 | C05 | 子代理 completion batch、steer 批次仍为受保护内容，不被压缩或丢弃 |
-| C06 | 每回合开始最多一次压缩（不变）；回合内维护性压缩 ≤ `MaximumInTurnCompactionsPerTurn`（3 次），不落库、不裁剪（见 `direct-in-turn-compaction-design.md`） |
+| C06 | 每回合开始最多一次压缩（不变）；回合内维护性压缩 ≤ `MaximumInTurnCompactionsPerTurn`（10 次），不裁剪，随回合终态落库为**一条**记录（见 `direct-in-turn-compaction-design.md`） |
 | C07 | 压缩使用本回合 lease 或独立 lease，两者都在回合结束前释放 |
 | C08 | 设置不可用时回落默认策略；模型不可用时回退本回合模型并留诊断 |
 | C09 | 计数只有一个来源：tokenizer 计数 + provider 实测；字节估算不得作为触发依据 |
@@ -418,6 +480,10 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 | C11 | 计数成本有界：增量维护 + 有界缓存，不重复全量扫描、不产生 SQL |
 | C12 | 界面区分实测与近似：实测值直接显示，计数近似值加 `~`；不可用时显示不可用而不是数字 |
 | C13 | 没有不可压缩的单元类型：含图单元与普通单元同等进入前缀；摘要请求不含二进制内容 |
+| C14 | 触发点只有一个公式（`DirectCompactionPlanner.ResolveTrigger`），与界面“当前上下文”同口径；回合开始、回合内检查点与用量环刻度都取自它，前端不复制公式 |
+| C15 | 压缩不自激：对规划结果应用后再规划必须拒绝（保留目标针对整个 prompt）；唯一例外是独自超过保留目标的最新单元 |
+| C16 | 一个请求只有一个摘要 section，位于固定 system 文本之后；一条落库的摘要独立代表其边界之前的一切 |
+| C17 | 摘要不出部分结果：分块链式摘要任一块失败即整体失败，不应用已完成的块 |
 
 ### 10.2 删除清单（完成后不得残留）
 
@@ -433,16 +499,20 @@ public sealed record ContextCompactionFailedEvent(string Reason) : AgentStreamEv
 
 | 风险 | 说明 | 缓解 |
 | --- | --- | --- |
-| 编码不匹配 | Claude 只能近似（OpenAI 编码） | 阈值保留 25% 余量；provider 实测值作为下一回合的下限 |
+| 编码不匹配 | Claude 只能近似（OpenAI 编码） | 触发点封顶在可用输入的 90%；provider 实测值作为下一回合的下限 |
 | 图片计数偏低 | 单图按常数 1600 计；高分辨率档的大图实际可达 4,784 | 回合开始触发以上一回合的 provider 实测值为下限（§5.4）；保留多少仍按本地计数切分，图片极密集的会话仍可能走到可读的超窗错误 |
 | 图片被摘要 | 含图消息滑出保留尾部后，模型只剩摘要里的文字 | 摘要指令要求保留文件名与已得出的结论；`read_file` 的图可按路径重读，用户附件需重新发送；转录照常显示 |
 | 计数性能 | .NET BPE 比 Rust tiktoken 慢，长历史首次全量计数可能上百毫秒 | 增量维护 + 按消息缓存 + 后台线程；预热词表；实测后按需再优化 |
 | 词表分发 | 数据包把词表嵌进程序集（实测 O200kBase 包 2.42 MB、其中 DLL 1.20 MB；Cl100kBase 包约 1.10 MB），安装包与解压产物都会变大 | 可接受；若需瘦身，改为安装包内独立 `.tiktoken` 文件 + 路径配置（抽象层已预留） |
 | 摘要丢信息 | 长任务细节可能被压掉 | 摘要指令强制保留文件路径/命令/未完成项；保留比例 50%；摘要可展开复查 |
 | 额外延迟 | 压缩是一次同步模型调用 | 每回合最多一次；仅超阈值时发生；`Started` 事件让界面显示“正在压缩上下文…” |
-| schema 版本抬升 | v32 使旧库只读拒绝（既有策略，已确认接受） | 实施前明确告知；版本断言三处同步 |
+| schema 版本抬升 | v32、v33 各使旧库只读拒绝一次（既有策略，已确认接受） | 实施前明确告知；拒绝文案引用版本常量；v32 → v33 只加一列可空列，§4.2 给出手工升级语句 |
 | continuation 提交路径 | detached 回合需要把压缩项带进原子事务 | 复用 `SqliteConversationTurnWriter`；若 committer 契约膨胀过大，退化为“continuation 不落压缩项，仅本回合生效”。**实际结果（C3）：未退化** —— `SubagentContinuationTurnCommitter` 的原子事务直接携带压缩项，child/continuation 与交互回合共用同一条写入路径，代价只是提交契约多一个可空集合 |
-| 回合内无压缩 | 极端长工具循环仍可能超窗——**已解决**：回合内压缩已落地（见 `direct-in-turn-compaction-design.md`），复用同一阈值与保留比例、上限 3 次、零持久化 | 回合内压缩在循环顶部、steer 排空之前检查；压缩失败 / 计数不可用 / 上限用尽均回退为“本回合不再压缩” |
+| 回合内无压缩 | 极端长工具循环仍可能超窗——**已解决**：回合内压缩已落地（见 `direct-in-turn-compaction-design.md`），复用同一触发点与保留比例、上限 10 次，并随回合落库 | 回合内压缩在循环顶部、steer 排空之前检查；压缩失败 / 计数不可用 / 上限用尽均回退为“本回合不再压缩” |
+| 最大输出占窗口过大 | 最大输出 384K、窗口 1M 的模型可用输入只有约 664K，比例调得再高触发点也停在 598K | 这是模型配置的事实而不是缺陷；用量环的刻度会如实显示封顶后的位置。想用满窗口需在模型管理里调低最大输出 |
+| steer 之后的回合内压缩 | 落库边界是“一个 sequence + 其后那条消息里的一个锚点”，跨不过一条已消费的 steer | 那之后的回合内摘要只在本回合请求里生效，落库记录停在 steer 之前；下一回合多重放一段，必要时在回合开始再压一次（分块摘要保证这条路径不会失败） |
+| 锚点失效 | 崩溃、可重试失败的 continuation、解析不到 call id | 一律退化为“多重放已摘要的内容”，不丢历史（§4.1） |
+| Anthropic 缓存口径未核实 | `InputTokenCount` 在 Anthropic 协议下是否包含缓存命中的 token 没有实测（OpenAI 协议路径在 C18 已实测包含）。若不包含，界面读数与实测下限都会偏低 | 本地计数不受影响，触发仍会发生，只是少了实测下限这层校正；待补一条 probe 测试钉住 |
 
 ## 12. 验证入口
 

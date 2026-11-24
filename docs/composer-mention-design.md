@@ -1,6 +1,6 @@
 # 输入框快捷命令与行内 chip 设计（`@` 文件 / `/` 指令 / `$` 技能）
 
-状态：已实施（2026-11-01）· 纯前端改动，宿主零改动，schema 仍为 v32。
+状态：已实施（2026-11-01）· 纯前端改动，宿主零改动，不改 schema。
 关系：技能 token 的宿主契约见 [扩展系统设计](direct-extensions-system-design.md) §8.2 / §8.4；输入受理与队列见 [消息队列设计](direct-message-input-design.md)；图片粘贴/拖拽见 [附件设计](input-attachment-design.md)。
 
 ## 0. 结论摘要

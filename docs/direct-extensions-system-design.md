@@ -4,7 +4,7 @@
 >
 > 2026-09-26 接缝勘误：本文后来描述的以下接缝已被重构替换，本文中对应示例/调用链已同步为当前实现，其余历史阶段内容仅作设计记录：`DirectTurnCapabilityLease.ToolDescriptors` → `Bindings`（`IReadOnlyDictionary<string, DirectToolBinding>`）；审批与执行检查点包装 `ApprovedAIFunction` → `DirectToolInvoker`；适配器内部取共享 HttpClient → `AiChatClientFactory.Create(preparation, AiChatClientPipelineOptions)` 按回合在共享 pooled handler 上构造 `HttpClient` 并注入适配器。
 >
-> 2026-10-28 视图与权限已删除：插件不再贡献界面，也没有权限披露。`contributes.views`、`permissions`、`PermissionReviewDialog`、`plugin-host/*` 与 `window.selfclaw` 都不再存在。schema 仍是 v32，`acknowledged_permissions_json` / `acknowledged_at_utc` 两列留在表里但代码不再读写。下文里关于视图、权限确认和这两列用途的段落是当时的设计，不要按它们把能力加回来。
+> 2026-10-28 视图与权限已删除：插件不再贡献界面，也没有权限披露。`contributes.views`、`permissions`、`PermissionReviewDialog`、`plugin-host/*` 与 `window.selfclaw` 都不再存在。这次删除没有改 schema，`acknowledged_permissions_json` / `acknowledged_at_utc` 两列留在表里但代码不再读写。下文里关于视图、权限确认和这两列用途的段落是当时的设计，不要按它们把能力加回来。
 
 > 状态：设计稿 v1.1（2026-07-26；v1.1 按当前代码逐链路核对后补充事实修正与缺口：现状行为 §1.2–§1.4、ToolPolicy §5.4、权限确认持久化 §6.2、跨回合与 token 规则 §8.4、stdio 环境事实修正 §9.1、结果映射 §9.5、审批载体 §9.4、投影链 §10.2、桥接推送与超时 §11.2、DI 接线 §15）
 >
@@ -587,7 +587,7 @@ Direct system message 使用稳定顺序：
 
 Skill 激活状态**不是持久化的会话状态**，它在每回合准备时从这次请求会重放的历史里推导出来（2026-11 修订，原先每轮无条件重置）：
 
-1. **激活随历史重放而延续**。工具往返现在整体重放，所以上一轮 `activate_skill` 的结果（`SKILL.md` 全文）仍在模型眼前。`SkillCapabilitySource.FindReplayedActivations` 把「状态 Completed、所属消息仍在重放范围内（压缩边界之后且回合可重放）、id 仍解析为有效 Skill」的 `activate_skill` 调用恢复为已激活，交给 `SkillRuntimeToolset.CreateTools` 的 `restoredSkillIds`：`read_skill_resource` / `run_skill_script` / `list_skill_resources` 直接可用，再次 `activate_skill` 只回「已激活」而不重复注入全文。原先的每轮重置会让工具拒绝一个历史里明明显示已激活的 Skill，模型只能多走一个往返、把同一份全文再注入一遍。一旦压缩覆盖了那次激活，全文不在 prompt 里了，激活也随之失效，回到紧凑目录。恢复的 Skill 不占本回合 5 个激活名额（名额限制的是本回合新增进 prompt 的全文）。**显式激活（`[/id]`）仍只作用于当回合**：它的全文在 system section 里而不在历史里，下一轮不会延续。仍然不引入持久化的“会话已激活集合”。
+1. **激活随历史重放而延续**。工具往返现在整体重放，所以上一轮 `activate_skill` 的结果（`SKILL.md` 全文）仍在模型眼前。`SkillCapabilitySource.FindReplayedActivations` 把「状态 Completed、所属消息仍在重放范围内（压缩边界之后且回合可重放）、**该次调用自身没有被摘要覆盖**、id 仍解析为有效 Skill」的 `activate_skill` 调用恢复为已激活，交给 `SkillRuntimeToolset.CreateTools` 的 `restoredSkillIds`：`read_skill_resource` / `run_skill_script` / `list_skill_resources` 直接可用，再次 `activate_skill` 只回「已激活」而不重复注入全文。「调用自身没有被覆盖」这一条来自回合内压缩落库（2026-11-24）：回合内压缩的边界可以落在一条 assistant 消息内部（`direct-context-compaction-design.md` §4.1 的锚点），所以消息仍在重放不等于其中的激活仍在重放，判定统一走 `DirectHistoryReplay.IsCovered`。原先的每轮重置会让工具拒绝一个历史里明明显示已激活的 Skill，模型只能多走一个往返、把同一份全文再注入一遍。一旦压缩覆盖了那次激活，全文不在 prompt 里了，激活也随之失效，回到紧凑目录。恢复的 Skill 不占本回合 5 个激活名额（名额限制的是本回合新增进 prompt 的全文）。**显式激活（`[/id]`）仍只作用于当回合**：它的全文在 system section 里而不在历史里，下一轮不会延续。仍然不引入持久化的“会话已激活集合”。
 2. **历史消息中的 token**。激活语义只由最新 user message 触发，也只有最新消息里本轮消费掉的 token 会从发给 provider 的文本中剥离（它们的全文已在本轮 system section 里）。历史 user 消息里的 token **一律保留原文**、不失败：显式激活只管一回合，如果把历史 token 也剥掉，后续回合的模型既看不到 Skill 全文、也看不到用户曾经点名过它的任何痕迹；保留下来，目录段会说明「更早消息里的 `[/skill-id]` 只在那一回合激活过该 Skill，仍需要就再 `activate_skill`」。这同时去掉了每回合对全部历史消息做 token 扫描的成本。只有最新消息里的未知 token 才按显式激活规则失败。数据库与 Vue 中的原始消息始终不变。
 3. **CLI 回合原样透传**。composer 模式覆盖允许同一会话临时切到 CLI（`ResolveComposerExecutionMode()`）。CLI 分支的 `ExtractPrompt()` 只取最新 user 文本，SelfClaw 不解析、不剥离、不失败，token 作为字面文本交给 CLI；`SkillPicker` 在生效模式为 CLI 时隐藏（§12.6），但用户手打的 token 不做拦截。
 4. **审计**。显式激活在能力解析阶段完成、没有 function call，本轮激活的 Skill 列表记入 `DirectTurnCapabilityLease.Diagnostics`（信息级），保证事后能从日志还原“这轮注入了什么”。
@@ -731,7 +731,7 @@ DirectTurnPreparer.PrepareAsync()
   -> AiChatClientFactory.Create(preparation, new AiChatClientPipelineOptions(
        capabilityLease.Tools))            // SDK 管线只挂 UseLogging
   -> DirectHistoryReplay.BuildUnits(request.Messages, …, capabilityLease.MessageAdjustments)
-     + DirectSystemPrompt.BuildSystemText(request.Agent.Instructions, capabilityLease.SystemInstructions, …)
+     + DirectSystemPrompt.BuildFixedText(request.Agent.Instructions, capabilityLease.SystemInstructions, …)
      -> DirectHistoryReplay.Compose(units, systemText, trailingProtectedMessages, compression)
   -> DirectTurnRun.RunAsync()             // 每回合一个实例的显式循环，≤ MaximumProviderRequestsPerTurn = 1024 次 provider 请求
        -> lease.Client.GetStreamingResponseAsync()

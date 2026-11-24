@@ -5,21 +5,14 @@ export { formatTokenCount };
 
 const unknownTokenCount = unknownText;
 const unavailableContextText = '不可用';
-const estimatedContextTitle = '由本地计数近似';
 
-export function formatContextUsage(usage) {
-	if (!usage) return null;
-	const estimated = usage.contextIsEstimated === true;
-	const contextTokens = formatTokenCount(usage.contextTokens);
-	const known = contextTokens !== unknownTokenCount;
-	return {
-		contextText: known ? formatContextSize(contextTokens, formatTokenCount(usage.contextWindowTokens), estimated) : unavailableContextText,
-		contextTitle: known && estimated ? estimatedContextTitle : '',
-		totals: formatUsageTotals(usage),
-	};
-}
+// 色调分界：知道压缩触发点时按「离触发还有多远」上色，否则退回按窗口饱和度上色。
+const triggerToneStops = { warm: 0.85, critical: 1 };
+const windowToneStops = { warm: 0.65, critical: 0.85 };
 
-export function calculateUsageProgress(usage, fallbackAbsoluteThreshold = 64_000) {
+// compactionEnabled 来自设置页的实时状态：宿主下发的触发点是上一回合算出来的，
+// 用户刚关掉自动压缩时它还在，刻度必须立刻消失而不是等到下一回合。
+export function calculateUsageProgress(usage, fallbackAbsoluteThreshold = 64_000, compactionEnabled = true) {
 	if (!usage) return null;
 
 	const hasContextTokens = usage.contextTokens != null && Number.isFinite(Number(usage.contextTokens)) && Number(usage.contextTokens) >= 0;
@@ -44,7 +37,16 @@ export function calculateUsageProgress(usage, fallbackAbsoluteThreshold = 64_000
 		percentageText = percentage === 0 ? '<1%' : `${percentage}%`;
 	}
 
-	const tone = ratio >= 0.85 ? 'critical' : ratio >= 0.65 ? 'warm' : 'normal';
+	// 触发点由宿主按压缩公式算好下发，与 contextTokens 同口径；前端不复制公式。
+	const triggerTokens = compactionEnabled ? positiveNumber(usage.compactionTriggerTokens) : null;
+	// 没有声明窗口时进度的上限本身就是压缩阈值，再画一个刻度只是重复。
+	const triggerRatio = triggerTokens !== null && hasWindow && triggerTokens < limitTokens
+		? triggerTokens / limitTokens
+		: null;
+	const tone = resolveTone(
+		triggerTokens !== null && hasContextTokens ? contextTokens / triggerTokens : ratio,
+		triggerTokens !== null ? triggerToneStops : windowToneStops,
+	);
 
 	const estimated = usage.contextIsEstimated === true;
 	let contextText = unavailableContextText;
@@ -77,7 +79,36 @@ export function calculateUsageProgress(usage, fallbackAbsoluteThreshold = 64_000
 		totalTokensText,
 		cacheHitText,
 		contextIsEstimated: estimated,
+		triggerTokens,
+		triggerRatio,
+		triggerText: triggerRatio === null ? null : formatTokenCount(triggerTokens),
+		triggerShareText: triggerRatio === null ? null : `${Math.round(triggerRatio * 100)}%`,
 	};
+}
+
+function positiveNumber(value) {
+	if (value == null) return null;
+	const number = Number(value);
+	return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function resolveTone(fill, stops) {
+	if (fill >= stops.critical) return 'critical';
+	return fill >= stops.warm ? 'warm' : 'normal';
+}
+
+// 圆环上一道径向刻度的两个端点。角度与进度弧同源：0 在弧的起点，顺着弧的方向增长，
+// 所以刻度落在「进度弧长到这里就触发」的位置上。
+export function ringTick(ratio, { center, inner, outer }) {
+	if (ratio == null || !Number.isFinite(ratio)) return null;
+	const angle = 2 * Math.PI * Math.min(1, Math.max(0, ratio));
+	const point = (radius) => ({
+		x: Number((center + radius * Math.cos(angle)).toFixed(3)),
+		y: Number((center + radius * Math.sin(angle)).toFixed(3)),
+	});
+	const from = point(inner);
+	const to = point(outer);
+	return { x1: from.x, y1: from.y, x2: to.x, y2: to.y };
 }
 
 // 缓存命中率 = 缓存命中的输入 token 占全部输入 token 的比例；任一侧未知或为零时不显示，
@@ -102,19 +133,6 @@ export function formatCompressionNotice(notice) {
 		hasSummary: typeof notice.summary === 'string' && notice.summary.trim().length > 0,
 		title: model ? `压缩模型：${model}` : '',
 	};
-}
-
-// 近似标记只加在上下文尺寸上：窗口容量是模型声明值，不是计数得来的。
-function formatContextSize(tokens, windowTokens, estimated) {
-	const size = windowTokens === unknownTokenCount ? tokens : `${tokens} / ${windowTokens}`;
-	return estimated ? `~${size}` : size;
-}
-
-// 累计为 0（尚无回合）时整段省略，避免状态栏常驻一排破折号。
-function formatUsageTotals(usage) {
-	return [['输入', usage.inputTokens], ['输出', usage.outputTokens]]
-		.map(([label, value]) => ({ label, value: formatTokenCount(value) }))
-		.filter((part) => part.value !== unknownTokenCount);
 }
 
 function formatCompressedMessages(messageCount) {

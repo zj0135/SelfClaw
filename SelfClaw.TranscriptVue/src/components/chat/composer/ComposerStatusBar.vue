@@ -10,7 +10,6 @@ const props = defineProps({
 	workspaceMode: { type: String, default: 'local' },
 	gitLoading: { type: Boolean, default: false },
 	gitError: { type: String, default: '' },
-	usage: { type: Object, default: null },
 	toolPermissionMode: { type: String, default: 'require-approval' },
 });
 

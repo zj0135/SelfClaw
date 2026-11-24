@@ -26,9 +26,9 @@ dotnet run --project SelfClaw.Desktop/SelfClaw.Desktop.csproj
 6. **工具审批**：Direct 工具审批（默认 `RequireApproval`）只有 Vue 审批栏或 Windows toast 能裁决；没有超时自动拒绝；订阅者失败、调用方取消或关闭即拒绝。`ask_user`（模型主动提问）**不是审批**：`FullAccess` 下同样阻塞等待，且自动化/子代理/continuation 回合不绑定它（无界面会死锁）；`requestId` 是 WebView 传输关联键，提问批次 id 走 `questionRequestId`，两者不得混用。
 7. **WPF**：`WindowStyle` 必须保持 `SingleBorderWindow`。
 8. **会话删除**：先墓碑 → 停回合 → 取消并限时等待子任务 → 才做 SQLite 级联；超时中止删除；列表与导航只接受 `ConversationKind.Interactive`。
-9. **数据库**：schema 版本 **32**；非 v32 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
+9. **数据库**：schema 版本 **33**；非 v33 或未版本化数据库只读拒绝，绝不迁移、回填或隐式删除。
 10. **子代理活动面板**：与主转录、输入区互相独立；子内容不得进入父转录项或影响 composer 忙碌态；摘要页 ≤50 条、详情窗口 ≤64 块、序列化 ≤256 KiB；文本更新不得触发 per-token SQL。
-11. **自动化历史**：转录永久保留、回收只靠手动删除；删除单条 run / 清空历史只删终态 run 并级联其会话（在跑先停止）；删除任务先取消 → 限时等待（`AutomationDefaults.DeleteWait`）→ 级联，超时返回 `DeleteTimeout` 且绝不半删。体积显示是 SQL `LENGTH()` 只读粗算，不得为此改 schema（仍 v32）。
+11. **自动化历史**：转录永久保留、回收只靠手动删除；删除单条 run / 清空历史只删终态 run 并级联其会话（在跑先停止）；删除任务先取消 → 限时等待（`AutomationDefaults.DeleteWait`）→ 级联，超时返回 `DeleteTimeout` 且绝不半删。体积显示是 SQL `LENGTH()` 只读粗算，不得为此改 schema。
 12. **输入框 chip 与 token**：技能 `[/id]` 是宿主契约（`SkillTokenParser` 独占 `[/…]` 形态，Direct 剥离并注入、CLI 原样透传）；文件引用 `@path`（含空白或特殊字符时 `@"..."`）与指令 `/name` 是纯文本约定，宿主不解析、不剥离。不要为文件 / 指令引入第二套宿主 token 解析；转录 `file_mention` 规则与 `renderers/composerText.js` 的裸路径字符类必须保持一致。
 13. **网络出口**：所有 .NET 出站必须经 `AiProviderHttpClientProvider`（handler 由 `NetworkProxyHttpHandler` 构造），新增出站路径要么走它，要么用 `NetworkProxyEnvironment` 给自建子进程注入出口；`SocketsHttpHandler` 默认跟随系统代理，所以「本地网络」必须显式 `UseProxy = false`。WebView2 不接入代理（理由见 `docs/network-proxy-design.md` §5），Skill 脚本 / 终端 / Git 命令刻意不注入。
 14. **主进程单例**：一个登录会话只允许一个 SelfClaw 主进程（`Local\SelfClaw.Desktop` mutex）。后启动的进程只负责置位命名事件把已有窗口叫到前面，然后立刻退出——不得建宿主、不得碰数据库；已有实例的信号绝不能丢（窗口没建好就到的请求要补放）。详见 `docs/single-instance-design.md`。

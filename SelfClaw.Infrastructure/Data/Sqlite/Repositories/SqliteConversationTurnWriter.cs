@@ -268,12 +268,13 @@ internal static class SqliteConversationTurnWriter
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO conversation_compactions(id, conversation_id, turn_id, through_sequence, summary, model,
-                    source_message_count, source_tokens, summary_tokens, created_at_utc)
+                    source_message_count, source_tokens, summary_tokens, created_at_utc, through_tool_run_id)
                 VALUES($id, $conversationId, $turnId, $throughSequence, $summary, $model,
-                    $sourceMessageCount, $sourceTokens, $summaryTokens, $createdAt)
+                    $sourceMessageCount, $sourceTokens, $summaryTokens, $createdAt, $throughToolRunId)
                 ON CONFLICT(id) DO UPDATE SET through_sequence = excluded.through_sequence, summary = excluded.summary,
                     model = excluded.model, source_message_count = excluded.source_message_count,
-                    source_tokens = excluded.source_tokens, summary_tokens = excluded.summary_tokens
+                    source_tokens = excluded.source_tokens, summary_tokens = excluded.summary_tokens,
+                    through_tool_run_id = excluded.through_tool_run_id
                 WHERE conversation_compactions.conversation_id = excluded.conversation_id
                     AND conversation_compactions.turn_id = excluded.turn_id;
                 """;
@@ -287,6 +288,8 @@ internal static class SqliteConversationTurnWriter
             command.Parameters.AddWithValue("$sourceTokens", compaction.SourceTokens ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("$summaryTokens", compaction.SummaryTokens ?? (object)DBNull.Value);
             command.Parameters.AddWithValue("$createdAt", compaction.CreatedAtUtc.ToString("O"));
+            command.Parameters.AddWithValue("$throughToolRunId",
+                compaction.ThroughToolRunId?.ToString("D") ?? (object)DBNull.Value);
             if (await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false) != 1)
             {
                 throw new InvalidOperationException("A compaction cannot change its conversation or turn.");
@@ -556,7 +559,8 @@ internal static class SqliteConversationTurnWriter
         {
             if (compaction.Id == Guid.Empty || compaction.ConversationId != commit.Turn.ConversationId ||
                 compaction.TurnId != commit.Turn.Id || string.IsNullOrWhiteSpace(compaction.Summary) ||
-                compaction.ThroughSequence < 0 || compaction.SourceMessageCount < 0)
+                compaction.ThroughSequence < 0 || compaction.SourceMessageCount < 0 ||
+                compaction.ThroughToolRunId == Guid.Empty)
             {
                 throw new ArgumentException("A compaction requires owned identities, a summary and non-negative bounds.", nameof(commit));
             }

@@ -16,6 +16,9 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct.Context;
 
 public sealed class DirectContextCompressorTests
 {
+    private const int ChunkedWindow = 12_000;
+    private const int MessageCost = DirectInTurnCompactionTests.CountingTokenCounter.MessageCost;
+
     private static readonly Guid ConversationId = Guid.Parse("11111111-1111-1111-1111-111111111111");
     private static readonly Guid TurnId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
@@ -324,6 +327,128 @@ public sealed class DirectContextCompressorTests
         split.SummaryTokens.Should().Be(single.SummaryTokens);
     }
 
+    [Fact]
+    public async Task Sizes_the_output_budget_from_the_previous_summary_as_well()
+    {
+        var client = new RecordingChatClient();
+        var counter = new DirectTokenCounter();
+        var profile = CreateProfile("turn-model");
+        var previousSummary = string.Join(' ', Enumerable.Repeat("decision", 900));
+        var previousTokens = counter.CountText(previousSummary, profile);
+        previousTokens.Should().BeGreaterThan(512);
+
+        await CreateCompressor(client, tokenCounter: counter).TryCompressAsync(Request(
+            [Unit(new ChatMessage(ChatRole.User, "hello"))],
+            sourceTokens: 400,
+            turnLease: CreateLease(client, profile),
+            previousSummary: previousSummary));
+
+        // A small prefix on its own would get the 512-token floor, which the summary it has to carry forward
+        // does not even fit into.
+        client.Requests.Single().Options?.MaxOutputTokens.Should().Be(previousTokens + 100);
+    }
+
+    [Fact]
+    public async Task Splits_a_prefix_the_summarizer_cannot_take_in_one_request_into_chained_summaries()
+    {
+        var calls = 0;
+        var client = new RecordingChatClient((_, _, _) =>
+            Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, $"summary {++calls}"))));
+        var counter = new DirectInTurnCompactionTests.CountingTokenCounter();
+        var profile = CreateProfile("turn-model", contextWindowTokens: ChunkedWindow);
+        var budget = ChunkBudget();
+        var units = HalfBudgetUnits(6);
+        var messageTokens = counter.CountMessages(units[0].Messages, profile) ?? 0;
+
+        var outcome = await CreateCompressor(client, tokenCounter: counter).TryCompressAsync(Request(
+            units, sourceTokens: 6 * messageTokens, turnLease: CreateLease(client, profile), previousSummary: "earlier decisions"));
+
+        // Two messages fill the budget, so the six of them go out in three requests.
+        client.Requests.Should().HaveCount(3);
+        client.Requests.SelectMany(request => request.Messages.Skip(2))
+            .Should().Equal(units.SelectMany(unit => unit.Messages), "every message is summarized exactly once, in order");
+        client.Requests.Should().OnlyContain(request =>
+            request.Messages.Skip(2).Sum(message => counter.CountMessages(new[] { message }, profile)) <= budget);
+        client.Requests[0].Messages[1].Text.Should().Contain("earlier decisions");
+        client.Requests[1].Messages[1].Text.Should().Contain("summary 1", "each call hands its summary to the next");
+        client.Requests[2].Messages[1].Text.Should().Contain("summary 2");
+        client.Requests[1].Options?.MaxOutputTokens.Should().Be(
+            Math.Clamp("summary 1".Length + (2 * messageTokens / 4), 512, 4096),
+            "a chunk is budgeted by its own size and the summary it carries forward");
+
+        outcome.Should().NotBeNull();
+        outcome.Summary.Should().Be("summary 3");
+        outcome.SourceMessageCount.Should().Be(6);
+        outcome.SourceTokens.Should().Be(6 * messageTokens, "the result still reports the whole prefix");
+    }
+
+    [Fact]
+    public async Task Never_starts_a_chunk_with_the_tool_message_that_answers_the_call_before_it()
+    {
+        var client = new RecordingChatClient();
+        var counter = new DirectInTurnCompactionTests.CountingTokenCounter();
+        var profile = CreateProfile("turn-model", contextWindowTokens: ChunkedWindow);
+        var budget = ChunkBudget();
+        var call = new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?>());
+        var result = new ChatMessage(ChatRole.Tool, [new FunctionResultContent("call-1", "file content")]);
+        // The first two messages stop 10 tokens short of the budget, so the tool message (20) is what crosses it.
+        var half = budget / 2;
+        var units = new[]
+        {
+            Unit(new ChatMessage(ChatRole.User, new string('u', half - MessageCost))),
+            Unit(new ChatMessage(ChatRole.Assistant,
+                [new TextContent(new string('a', budget - half - 10 - MessageCost)), call]), result),
+            Unit(new ChatMessage(ChatRole.User, new string('v', 100)))
+        };
+
+        await CreateCompressor(client, tokenCounter: counter).TryCompressAsync(Request(
+            units, sourceTokens: 2 * budget, turnLease: CreateLease(client, profile)));
+
+        client.Requests.Should().HaveCount(2);
+        client.Requests[0].Messages.Should().Contain(result, "a result stays in the request that carries its call");
+        client.Requests[1].Messages.Skip(2).Should().ContainSingle().Which.Should().BeSameAs(units[2].Messages[0]);
+    }
+
+    [Fact]
+    public async Task Returns_null_when_one_chunk_produces_no_summary()
+    {
+        var calls = 0;
+        var client = new RecordingChatClient((_, _, _) => ++calls == 1
+            ? Task.FromResult(new ChatResponse(new ChatMessage(ChatRole.Assistant, "summary 1")))
+            : Task.FromException<ChatResponse>(new InvalidOperationException("provider exploded")));
+        var profile = CreateProfile("turn-model", contextWindowTokens: ChunkedWindow);
+        var units = HalfBudgetUnits(4);
+
+        var outcome = await CreateCompressor(client, tokenCounter: new DirectInTurnCompactionTests.CountingTokenCounter())
+            .TryCompressAsync(Request(units, sourceTokens: 2 * ChunkBudget(), turnLease: CreateLease(client, profile)));
+
+        outcome.Should().BeNull("a summary of half the prefix would silently drop the other half");
+        client.Requests.Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task Sends_one_request_when_the_summarizer_declares_no_window()
+    {
+        var client = new RecordingChatClient();
+
+        await CreateCompressor(client, tokenCounter: new DirectInTurnCompactionTests.CountingTokenCounter())
+            .TryCompressAsync(Request(HalfBudgetUnits(6), sourceTokens: 3 * ChunkBudget(),
+                turnLease: CreateLease(client, "turn-model")));
+
+        client.Requests.Should().ContainSingle("nothing says how much this model accepts, so nothing is split");
+    }
+
+    // The compressor's own formula, restated: room for the answer and the previous summary is held back from
+    // the window, 90% of the rest is usable, and the instruction (counted by its length here) comes out of it.
+    private static int ChunkBudget()
+        => (int)((ChunkedWindow - (2 * 4096)) * 0.9d) - CompressionInstruction.Text.Length;
+
+    // Messages that each cost half the chunk budget, so exactly two of them fit one request.
+    private static DirectPromptHistoryUnit[] HalfBudgetUnits(int count)
+        => Enumerable.Range(0, count)
+            .Select(index => Unit(new ChatMessage(ChatRole.User, new string((char)('a' + index), (ChunkBudget() / 2) - MessageCost))))
+            .ToArray();
+
     private static DirectContextCompressor CreateCompressor(
         RecordingChatClient client,
         CapturingLogger? logger = null,
@@ -353,9 +478,15 @@ public sealed class DirectContextCompressorTests
     private static AiChatClientLease CreateLease(IChatClient client, AiModelProfile profile)
         => new(client, new ChatOptions(), profile, new HttpClient());
 
-    private static AiModelProfile CreateProfile(string model)
+    private static AiModelProfile CreateProfile(string model, int? contextWindowTokens = null)
     {
         var now = DateTimeOffset.UtcNow;
+        var options = new Dictionary<string, System.Text.Json.JsonElement>();
+        if (contextWindowTokens is int window)
+        {
+            options["context_window_tokens"] = System.Text.Json.JsonSerializer.SerializeToElement(window);
+        }
+
         return new AiModelProfile(
             Guid.NewGuid(),
             Guid.NewGuid(),
@@ -363,7 +494,7 @@ public sealed class DirectContextCompressorTests
             AiProviderApiFormat.OpenAIChatCompletions,
             model,
             new AiSamplingOptions(false, 0d, false, 0d),
-            new Dictionary<string, System.Text.Json.JsonElement>(),
+            options,
             now,
             now);
     }

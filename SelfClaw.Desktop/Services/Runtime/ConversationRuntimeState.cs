@@ -81,6 +81,12 @@ internal sealed class ConversationRuntimeState
     public TranscriptLiveUsage? LiveUsage { get; set; }
 
     /// <summary>
+    /// The context size at which the running turn compacts, or null when it does not (compaction off, a CLI
+    /// turn). Transient like <see cref="LiveUsage"/>: it only positions a mark on the usage meter.
+    /// </summary>
+    public int? CompactionTriggerTokens { get; set; }
+
+    /// <summary>
     /// Raised after a transcript mutation. <c>true</c> requests an immediate publish (terminal snapshot);
     /// <c>false</c> lets the owner throttle streaming ticks. autoScroll is implied for every turn update.
     /// </summary>

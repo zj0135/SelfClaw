@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { calculateUsageProgress, formatCompressionNotice, formatContextUsage, formatTokenCount } from '../src/renderers/usageMeter.js';
+import { calculateUsageProgress, formatCompressionNotice, formatTokenCount, ringTick } from '../src/renderers/usageMeter.js';
 
 describe('formatTokenCount', () => {
 	it('abbreviates thousands and millions with at most two decimals', () => {
@@ -59,52 +59,6 @@ describe('formatCompressionNotice', () => {
 
 	it('ignores a missing notice', () => {
 		expect(formatCompressionNotice(null)).toBeNull();
-	});
-});
-
-describe('formatContextUsage', () => {
-	const usage = (overrides = {}) => ({
-		inputTokens: 1_240_000, outputTokens: 342_000, contextTokens: 12_400, contextWindowTokens: 32_000,
-		contextIsEstimated: false, ...overrides,
-	});
-
-	it('shows the context size against its window plus the cumulative totals', () => {
-		expect(formatContextUsage(usage())).toEqual({
-			contextText: '12.4K / 32K',
-			contextTitle: '',
-			totals: [{ label: '输入', value: '1.24M' }, { label: '输出', value: '342K' }],
-		});
-	});
-
-	it('falls back to an unavailable context when the size is unknown', () => {
-		expect(formatContextUsage(usage({ contextTokens: null }))).toMatchObject({
-			contextText: '不可用',
-			contextTitle: '',
-		});
-	});
-
-	it('drops the window when the model declares none', () => {
-		expect(formatContextUsage(usage({ contextWindowTokens: null })).contextText).toBe('12.4K');
-	});
-
-	it('marks an approximate size with a tilde and explains it in the tooltip', () => {
-		expect(formatContextUsage(usage({ contextIsEstimated: true }))).toMatchObject({
-			contextText: '~12.4K / 32K',
-			contextTitle: '由本地计数近似',
-		});
-	});
-
-	it('omits the cumulative part while no turn has reported tokens', () => {
-		expect(formatContextUsage(usage({ inputTokens: 0, outputTokens: 0 })).totals).toEqual([]);
-	});
-
-	it('keeps only the reported half of the cumulative totals', () => {
-		expect(formatContextUsage(usage({ outputTokens: null })).totals).toEqual([{ label: '输入', value: '1.24M' }]);
-	});
-
-	it('ignores a missing usage summary', () => {
-		expect(formatContextUsage(null)).toBeNull();
-		expect(formatContextUsage(undefined)).toBeNull();
 	});
 });
 
@@ -174,5 +128,75 @@ describe('calculateUsageProgress', () => {
 	it('returns null when usage is absent', () => {
 		expect(calculateUsageProgress(null)).toBeNull();
 		expect(calculateUsageProgress(undefined)).toBeNull();
+	});
+
+	describe('with the compaction trigger the host resolved', () => {
+		// 本机复现配置：窗口 1,048,576，比例 0.5，触发点 524,288。
+		const triggered = (overrides = {}) => usage({
+			contextWindowTokens: 1_048_576, compactionTriggerTokens: 524_288, ...overrides,
+		});
+
+		it('places the trigger on the same scale as the context reading', () => {
+			const progress = calculateUsageProgress(triggered({ contextTokens: 262_144 }));
+			expect(progress.percentageText).toBe('25%');
+			expect(progress.triggerTokens).toBe(524_288);
+			expect(progress.triggerRatio).toBe(0.5);
+			expect(progress.triggerText).toBe('524.29K');
+			expect(progress.triggerShareText).toBe('50%');
+		});
+
+		it('colours the meter by the distance to the trigger instead of the window', () => {
+			expect(calculateUsageProgress(triggered({ contextTokens: 262_144 })).tone).toBe('normal');
+			// 84% / 85% / 100% of the trigger, all far below the window stops of 65% / 85%.
+			expect(calculateUsageProgress(triggered({ contextTokens: 440_000 })).tone).toBe('normal');
+			expect(calculateUsageProgress(triggered({ contextTokens: 446_000 })).tone).toBe('warm');
+			expect(calculateUsageProgress(triggered({ contextTokens: 524_288 })).tone).toBe('critical');
+		});
+
+		it('keeps the window stops while the trigger is unknown', () => {
+			const progress = calculateUsageProgress(triggered({ compactionTriggerTokens: null, contextTokens: 524_288 }));
+			expect(progress.triggerTokens).toBeNull();
+			expect(progress.triggerRatio).toBeNull();
+			expect(progress.triggerText).toBeNull();
+			expect(progress.tone).toBe('normal');
+		});
+
+		it('drops a remembered trigger as soon as compaction is switched off', () => {
+			const progress = calculateUsageProgress(triggered({ contextTokens: 524_288 }), 64_000, false);
+			expect(progress.triggerTokens).toBeNull();
+			expect(progress.triggerRatio).toBeNull();
+			expect(progress.tone).toBe('normal');
+		});
+
+		it('draws no mark when the limit shown already is the trigger', () => {
+			const progress = calculateUsageProgress(
+				triggered({ contextWindowTokens: null, compactionTriggerTokens: 64_000, contextTokens: 60_000 }), 64_000);
+			expect(progress.isAbsoluteThreshold).toBe(true);
+			expect(progress.triggerRatio).toBeNull();
+			expect(progress.triggerText).toBeNull();
+			// 色调仍按触发点算：60K / 64K 已过 85%。
+			expect(progress.tone).toBe('warm');
+		});
+
+		it('ignores a trigger that is not a positive number', () => {
+			for (const value of [0, -1, 'n/a', Number.NaN]) {
+				expect(calculateUsageProgress(triggered({ compactionTriggerTokens: value })).triggerTokens).toBeNull();
+			}
+		});
+	});
+});
+
+describe('ringTick', () => {
+	const ring = { center: 10, inner: 5, outer: 9 };
+
+	it('starts where the progress arc starts and follows it around', () => {
+		expect(ringTick(0, ring)).toEqual({ x1: 15, y1: 10, x2: 19, y2: 10 });
+		expect(ringTick(0.25, ring)).toEqual({ x1: 10, y1: 15, x2: 10, y2: 19 });
+		expect(ringTick(0.5, ring)).toEqual({ x1: 5, y1: 10, x2: 1, y2: 10 });
+	});
+
+	it('has no tick without a ratio', () => {
+		expect(ringTick(null, ring)).toBeNull();
+		expect(ringTick(undefined, ring)).toBeNull();
 	});
 });

@@ -22,18 +22,20 @@ internal sealed class DirectPromptMeter
 
     /// <summary>
     /// Counts the prompt the turn-start path is about to send: the system text (including an existing summary),
-    /// the tool definitions and every unit that still gets replayed. Units an existing summary already covers
-    /// are not counted because they never reach the request.
+    /// the tool definitions, every unit that still gets replayed and the protected tail. Units an existing
+    /// summary already covers are not counted because they never reach the request.
     /// </summary>
     internal DirectCountedPrompt? CountTurnStartPrompt(
         string? systemText,
         IEnumerable<AITool>? tools,
         AiModelProfile profile,
         IReadOnlyList<DirectPromptHistoryUnit> units,
+        IReadOnlyList<ChatMessage> trailingProtectedMessages,
         long coveredThroughSequence,
         int outputReserve)
     {
         ArgumentNullException.ThrowIfNull(units);
+        ArgumentNullException.ThrowIfNull(trailingProtectedMessages);
         if (_tokenCounter.CountText(systemText, profile) is not int systemTokens)
         {
             return null;
@@ -45,6 +47,16 @@ internal sealed class DirectPromptMeter
         }
 
         var total = systemTokens + toolTokens;
+        if (trailingProtectedMessages.Count > 0)
+        {
+            if (_tokenCounter.CountMessages(trailingProtectedMessages, profile) is not int trailingTokens)
+            {
+                return null;
+            }
+
+            total += trailingTokens;
+        }
+
         var counted = new List<DirectPromptHistoryUnit>(units.Count);
         foreach (var unit in units)
         {

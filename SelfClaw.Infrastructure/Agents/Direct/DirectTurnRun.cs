@@ -58,10 +58,12 @@ internal sealed class DirectTurnRun
         _compactionStep = compactionStep;
         _attachmentContentReader = attachmentContentReader;
         _context = new DirectConversationContext(
-            setup.SystemText,
+            setup.FixedSystemText,
             setup.InitialUnits,
             setup.TrailingProtectedMessages,
-            setup.PlanSection);
+            setup.PlanSection,
+            setup.Summary,
+            setup.HistoryThroughSequence);
     }
 
     internal async Task<DirectLoopOutcome> RunAsync(CancellationToken cancellationToken)

@@ -21,6 +21,7 @@ public sealed class SqliteSchemaInitializationTests
     [InlineData(29)]
     [InlineData(30)]
     [InlineData(31)]
+    [InlineData(32)]
     [InlineData(99)]
     [InlineData(null)]
     public async Task Existing_non_target_schema_is_rejected_without_modifying_any_bytes_or_files(int? version)
@@ -51,7 +52,7 @@ public sealed class SqliteSchemaInitializationTests
         var bytes = await File.ReadAllBytesAsync(fixture.Paths.DatabasePath);
         var files = Directory.GetFiles(fixture.RootPath).Order().ToArray();
         var rejected = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Database.EnsureInitializedAsync());
-        rejected.Message.Should().Contain("requires schema v32").And.Contain("not modified");
+        rejected.Message.Should().Contain("requires schema v33").And.Contain("not modified");
         (await File.ReadAllBytesAsync(fixture.Paths.DatabasePath)).Should().Equal(bytes);
         Directory.GetFiles(fixture.RootPath).Order().Should().Equal(files);
     }
@@ -65,7 +66,7 @@ public sealed class SqliteSchemaInitializationTests
         {
             await connection.OpenAsync();
             await using var command = connection.CreateCommand();
-            command.CommandText = "CREATE TABLE schema_versions(version INTEGER PRIMARY KEY, applied_at_utc TEXT); INSERT INTO schema_versions VALUES(32, 'original');";
+            command.CommandText = "CREATE TABLE schema_versions(version INTEGER PRIMARY KEY, applied_at_utc TEXT); INSERT INTO schema_versions VALUES(33, 'original');";
             await command.ExecuteNonQueryAsync();
         }
 
@@ -90,12 +91,12 @@ public sealed class SqliteSchemaInitializationTests
         }
 
         await fixture.Database.EnsureInitializedAsync();
-        (await fixture.ScalarAsync("SELECT COUNT(*) FROM schema_versions WHERE version = 32;")).Should().Be(1L);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM schema_versions WHERE version = 33;")).Should().Be(1L);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM schema_versions;")).Should().Be(1L);
     }
 
     [Fact]
-    public async Task Target_v32_reopens_read_only_and_has_no_legacy_message_columns()
+    public async Task Target_v33_reopens_read_only_and_has_no_legacy_message_columns()
     {
         using var fixture = new ConversationPersistenceFixture();
         await fixture.Database.EnsureInitializedAsync();
@@ -106,6 +107,7 @@ public sealed class SqliteSchemaInitializationTests
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name IN ('usage', 'duration_ms', 'error_message', 'input_tokens', 'output_tokens');")).Should().Be(0L);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('messages') WHERE name IN ('turn_id', 'sequence') AND \"notnull\" = 1;")).Should().Be(2L);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('turn_usage') WHERE name = 'turn_id' AND pk = 1;")).Should().Be(1L);
+        (await fixture.ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('conversation_compactions') WHERE name = 'through_tool_run_id' AND \"notnull\" = 0;")).Should().Be(1L);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM pragma_foreign_key_list('subagent_tasks') WHERE \"from\" = 'parent_turn_id';")).Should().Be(0L);
         (await fixture.ScalarAsync("SELECT COUNT(*) FROM pragma_foreign_key_check;")).Should().Be(0L);
     }

@@ -19,20 +19,30 @@ internal static class DirectCompactionPlanner
     internal const int DefaultOutputTokenReserve = 4096;
 
     /// <summary>
-    /// Compression keeps this share of the trigger threshold as recent verbatim history. It is a constant
-    /// rather than a setting so the retention behaviour cannot drift below "always send the newest turns".
+    /// The share of the trigger a compacted prompt is brought back to. It is a constant rather than a setting
+    /// so the retention behaviour cannot drift below "always send the newest turns", and it sizes the whole
+    /// prompt rather than the history alone: whatever a summary cannot replace (instructions, tool
+    /// definitions, protected messages) comes out of the retained history, or a compacted prompt could still
+    /// sit at the trigger and be compacted again on every round trip.
     /// </summary>
     internal const double RetainedContextRatio = 0.5d;
 
     /// <summary>
+    /// How much of the usable input space (the window minus the output reserve) the trigger may reach. The
+    /// local count runs a few percent under a provider's own (a foreign tokenizer, wire framing), so a trigger
+    /// at the hard limit would wave through a request the provider then rejects.
+    /// </summary>
+    internal const double UsableInputShare = 0.9d;
+
+    /// <summary>
     /// Plans compaction from already counted units. Every decline returns a plan with no prefix and the
-    /// threshold that was decided against, so the caller can still report what it measured.
+    /// trigger that was decided against, so the caller can still report what it measured.
     /// </summary>
     /// <param name="observedTokens">
     /// The provider's own measurement of this context, when the caller holds one that describes the prompt
-    /// being planned. It can only raise the trigger: the local tokenizer approximates a provider's and sizes
-    /// an image by a constant, so a measurement at the threshold starts compaction even while the local count
-    /// is still below it. Which units the summary replaces is decided by the unit counts alone.
+    /// being planned. It can only start compaction earlier: the local tokenizer approximates a provider's and
+    /// sizes an image by a constant, so a measurement at the trigger starts compaction even while the local
+    /// count is still below it. Which units the summary replaces is decided by the unit counts alone.
     /// </param>
     internal static DirectCompressionPlan PlanCompression(
         IReadOnlyList<DirectPromptHistoryUnit> units,
@@ -49,16 +59,13 @@ internal static class DirectCompactionPlanner
         // the summarizer a text placeholder for each image, so no unit is a barrier the boundary cannot cross.
         // Stopping at the first image would leave everything after it uncompactable until the window overflows.
         var candidates = units.Where(unit => unit.SourceSequence > existingBoundary).ToArray();
-        var threshold = ResolveThreshold(policy, budget);
+        var trigger = ResolveTrigger(policy, budget);
 
-        // The reserve belongs to the trigger side: on a small window a prompt just under the threshold can
-        // still overflow once the response is written, and compacting is the only way to make room. Prompt
-        // counts stay reserve-free because the context-size readout reports them that way.
         if (!policy.Enabled || countedTokens is not int counted ||
-            Math.Max(counted + ResolveOutputReserve(budget.MaxOutputTokens), observedTokens ?? 0) < threshold ||
+            Math.Max(counted, observedTokens ?? 0) < trigger ||
             candidates.Length == 0)
         {
-            return Decline(threshold);
+            return Decline(trigger);
         }
 
         // A unit the caller never counted cannot be sized, so compaction degrades to "not this turn"
@@ -66,20 +73,73 @@ internal static class DirectCompactionPlanner
         // target is reached, so the older prefix units are never visited by the retention walk below and
         // have to be validated here with the rest.
         var unitTokens = new int[candidates.Length];
+        var candidateTokens = 0;
         for (var index = 0; index < candidates.Length; index++)
         {
             if (candidates[index].Tokens is not int tokens)
             {
-                return Decline(threshold);
+                return Decline(trigger);
             }
 
             unitTokens[index] = tokens;
+            candidateTokens += tokens;
         }
 
-        var keepTarget = (int)(threshold * RetainedContextRatio);
+        // Whatever the count holds beyond the candidates is what no summary can replace, and it stays in the
+        // compacted prompt. A measurement can start compaction while the count is still small, so the
+        // difference is floored instead of trusted to be positive.
+        var fixedTokens = Math.Max(0, counted - candidateTokens);
+        var keepTarget = Math.Max(0, (int)(trigger * RetainedContextRatio) - fixedTokens);
+        var prefixLength = candidates.Length - CountRetainedUnits(unitTokens, keepTarget);
+        if (prefixLength <= 0)
+        {
+            return Decline(trigger);
+        }
+
+        var prefix = candidates.Take(prefixLength).ToArray();
+        var sourceTokens = 0;
+        for (var index = 0; index < prefixLength; index++)
+        {
+            sourceTokens += unitTokens[index];
+        }
+
+        return new DirectCompressionPlan(true, prefix, prefix[^1].SourceSequence, sourceTokens, trigger);
+    }
+
+    /// <summary>
+    /// The single trigger formula, as a prompt size: the configured share of the declared window, capped by
+    /// what the output reserve leaves usable, or the absolute threshold when the model declares no window.
+    /// The reserve caps the trigger instead of being added to the count, so the number compared here is the
+    /// one the context readout shows: a model whose output cap is a large part of its window would otherwise
+    /// trigger far below the configured share, and below what a compaction retains. The turn-start planner
+    /// and the in-turn checkpoint both call this, so the two can never drift apart into different notions of
+    /// "the context is getting large".
+    /// </summary>
+    internal static int ResolveTrigger(DirectCompressionPolicy policy, DirectPromptBudget budget)
+    {
+        ArgumentNullException.ThrowIfNull(policy);
+        if (budget.ContextWindowTokens is not int window)
+        {
+            return policy.AbsoluteThresholdTokens;
+        }
+
+        var usableInput = window - ResolveOutputReserve(budget.MaxOutputTokens);
+        return Math.Max(0, Math.Min((int)(window * policy.ThresholdRatio), (int)(usableInput * UsableInputShare)));
+    }
+
+    /// <summary>
+    /// The output space a response may use, and the single definition of the default reserve: the trigger cap
+    /// and every window check must hold back the same amount, or a prompt can be judged to fit and then not.
+    /// </summary>
+    internal static int ResolveOutputReserve(int? maxOutputTokens)
+        => maxOutputTokens ?? DefaultOutputTokenReserve;
+
+    // Walks back from the newest unit and keeps as many as fit the target.
+    private static int CountRetainedUnits(int[] unitTokens, int keepTarget)
+    {
         var retainedUnits = 0;
         var retainedTokens = 0;
-        for (var index = candidates.Length - 1; index >= 0; index--)
+        for (var index = unitTokens.Length - 1; index >= 0; index--)
         {
             // The newest unit is always retained, even when it alone exceeds the retention target.
             if (retainedUnits > 0 && retainedTokens + unitTokens[index] > keepTarget)
@@ -91,42 +151,9 @@ internal static class DirectCompactionPlanner
             retainedTokens += unitTokens[index];
         }
 
-        var prefixLength = candidates.Length - retainedUnits;
-        if (prefixLength <= 0)
-        {
-            return Decline(threshold);
-        }
-
-        var prefix = candidates.Take(prefixLength).ToArray();
-        var sourceTokens = 0;
-        for (var index = 0; index < prefixLength; index++)
-        {
-            sourceTokens += unitTokens[index];
-        }
-
-        return new DirectCompressionPlan(true, prefix, prefix[^1].SourceSequence, sourceTokens, threshold);
+        return retainedUnits;
     }
 
-    /// <summary>
-    /// The single trigger formula: a share of the declared window, or the absolute threshold when the model
-    /// declares none. The turn-start planner and the in-turn checkpoint both call this, so the two can never
-    /// drift apart into different notions of "the context is getting large".
-    /// </summary>
-    internal static int ResolveThreshold(DirectCompressionPolicy policy, DirectPromptBudget budget)
-    {
-        ArgumentNullException.ThrowIfNull(policy);
-        return budget.ContextWindowTokens is int window
-            ? (int)(window * policy.ThresholdRatio)
-            : policy.AbsoluteThresholdTokens;
-    }
-
-    /// <summary>
-    /// The output space a response may use, and the single definition of the default reserve: the trigger side
-    /// and every window check must hold back the same amount, or a prompt can be judged to fit and then not.
-    /// </summary>
-    internal static int ResolveOutputReserve(int? maxOutputTokens)
-        => maxOutputTokens ?? DefaultOutputTokenReserve;
-
-    private static DirectCompressionPlan Decline(int thresholdTokens)
-        => new(false, [], 0, null, thresholdTokens);
+    private static DirectCompressionPlan Decline(int triggerTokens)
+        => new(false, [], 0, null, triggerTokens);
 }

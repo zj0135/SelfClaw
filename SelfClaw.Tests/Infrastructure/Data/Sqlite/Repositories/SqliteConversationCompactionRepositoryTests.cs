@@ -108,6 +108,39 @@ public sealed class SqliteConversationCompactionRepositoryTests
         compaction.SummaryTokens.Should().BeNull();
         compaction.SourceMessageCount.Should().Be(3);
         compaction.ThroughSequence.Should().Be(4);
+        compaction.ThroughToolRunId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task A_committed_anchor_round_trips_and_a_later_commit_of_the_same_compaction_moves_it()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var started = await fixture.StartAsync();
+        var repository = new SqliteConversationCompactionRepository(fixture.Database);
+        var first = new ConversationCompactionRecord(Guid.NewGuid(), started.Turn.ConversationId, started.Turn.Id,
+            1, "first summary", "test-model", 2, 4_000, 120, DateTimeOffset.UtcNow, ThroughToolRunId: Guid.NewGuid());
+        await fixture.Turns.CommitProgressAsync(new ConversationTurnCommit(started.Turn, [], [], [first]));
+
+        (await repository.ListAsync(started.Turn.ConversationId)).Should().ContainSingle().Which.Should().Be(first);
+
+        // One turn keeps a single in-turn compaction: each later summary of the turn rewrites it in place.
+        var moved = first with { Summary = "second summary", SourceMessageCount = 3, ThroughToolRunId = Guid.NewGuid() };
+        await fixture.Turns.CommitProgressAsync(new ConversationTurnCommit(started.Turn, [], [], [moved]));
+
+        (await repository.ListAsync(started.Turn.ConversationId)).Should().ContainSingle().Which.Should().Be(moved);
+    }
+
+    [Fact]
+    public async Task An_empty_anchor_is_rejected_instead_of_being_stored()
+    {
+        using var fixture = new ConversationPersistenceFixture();
+        var started = await fixture.StartAsync();
+        var compaction = new ConversationCompactionRecord(Guid.NewGuid(), started.Turn.ConversationId, started.Turn.Id,
+            1, "summary", "test-model", 2, 4_000, 120, DateTimeOffset.UtcNow, ThroughToolRunId: Guid.Empty);
+
+        var commit = () => fixture.Turns.CommitProgressAsync(new ConversationTurnCommit(started.Turn, [], [], [compaction]));
+
+        await commit.Should().ThrowAsync<ArgumentException>();
     }
 
     [Fact]

@@ -1,6 +1,6 @@
 # Direct `read_file` 图片内容设计（tool result 携带图片）
 
-状态：已实施（W1 数据/工具层 + W2 运行时投递，均经独立审核）· 设计冻结（决策 A–F）· 更新：2026-11-18（读图往返参与压缩、`PerImageTokens` 1600、配额文案）· schema 仍为 v32（零 DDL）
+状态：已实施（W1 数据/工具层 + W2 运行时投递，均经独立审核）· 设计冻结（决策 A–F）· 更新：2026-11-18（读图往返参与压缩、`PerImageTokens` 1600、配额文案）· 零 DDL
 关系：复用 [输入框图片附件设计](input-attachment-design.md) 的媒体类型白名单、magic bytes 校验与 `DataContent` 约定；扩展 [运行时执行流](runtime-execution-flow.md) 的工具结果契约与投递路径；计数与压缩约束见 [回合开始压缩](direct-context-compaction-design.md) 与 [回合内压缩](direct-in-turn-compaction-design.md)；能力装配见 [扩展系统设计](direct-extensions-system-design.md)。
 
 ## 0. 结论摘要
@@ -14,7 +14,7 @@
 | OpenAI Chat Completions | 无 | tool result 占位文本 + 紧随一条 user 消息携带图片 |
 | 持久化 | — | 只存文本元数据；**base64 不落库、不进日志、不进摘要** |
 | 回放 | — | live-only：图片只在读到它的那一回合可见（决策 A） |
-| schema | v32 | 仍 v32 |
+| schema | — | 不变（零 DDL） |
 
 ## 1. 已确认决策（2026-10-31，用户批准）
 
@@ -210,7 +210,7 @@ Direct 每回合都从 SQLite 重建 prompt：`DirectHistoryReplay.BuildUnits` �
 | 方案 | 否决理由 |
 | --- | --- |
 | 会话内内存 LRU 缓存 | 重启即 miss，行为「有时有图有时没图」，模型无法推理；每回合重发 base64，成本随回合线性增长 |
-| 回放时从工作区按 path + hash 重读 | 打破 composer「不做 I/O」的约束；hash 无处持久化（v32 禁迁移），只能塞进展示文本；文件变更后行为又退化 |
+| 回放时从工作区按 path + hash 重读 | 打破 composer「不做 I/O」的约束；hash 无处持久化（schema 禁迁移），只能塞进展示文本；文件变更后行为又退化 |
 | base64 落库 | schema 变更被禁；DB 体积、备份与隐私面全面扩大 |
 
 ## 9. 展示与持久化

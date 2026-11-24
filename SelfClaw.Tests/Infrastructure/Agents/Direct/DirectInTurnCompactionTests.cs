@@ -23,23 +23,37 @@ namespace SelfClaw.Tests.Infrastructure.Agents.Direct;
 /// </summary>
 public sealed class DirectInTurnCompactionTests
 {
+    // 100-character history messages cost 120 tokens each, so the replayed history is large enough to be worth
+    // summarizing while the current prompt and the round trips after it still fit the retained tail.
+    private static readonly string LongPrompt = new('p', 100);
+    private static readonly string LongAnswer = new('a', 100);
+
     [Fact]
     public async Task Growth_past_the_threshold_compacts_once_and_the_next_request_replays_the_summary()
     {
         var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 1));
         var factory = CreateFactory(client);
-        var runtime = CreateRuntime(factory);
+        // The round trip brings the prompt to 361 (instructions 48, history 240, prompt 31, round trip 42),
+        // past the trigger of 300. Half of it (150) less the instructions leaves 102 for history: the round
+        // trip and the prompt (73) stay, either history message would cross it.
+        var runtime = CreateRuntime(factory, policy: Policy(300));
 
-        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id, LongHistory())));
 
         client.SummaryCalls.Should().ContainSingle("exactly one in-turn compaction is needed to get back under the threshold");
         var started = events.OfType<ContextCompactionStartedEvent>().Should().ContainSingle().Subject;
-        started.ThresholdTokens.Should().Be(200);
+        started.ThresholdTokens.Should().Be(300);
         var completed = events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle().Subject;
         completed.CoveredUnitCount.Should().Be(2, "the two oldest units fall outside the retention target");
-        completed.SourceTokens.Should().Be(64);
+        completed.SourceTokens.Should().Be(240);
         completed.Model.Should().Be(factory.Profile.Model);
-        events.OfType<ContextCompactionCompletedEvent>().Should().BeEmpty("an in-turn summary is never persisted");
+        events.OfType<ContextCompactionCompletedEvent>().Should().BeEmpty("the turn start had nothing to compact");
+        // The record is what the next turn replays against: both covered units are stored messages, so the
+        // boundary is the newer one's sequence and nothing inside this turn's own message needs an anchor.
+        completed.AnchorCallId.Should().BeNull();
+        completed.Compaction.Should().BeEquivalentTo(
+            new { ThroughSequence = 2L, Summary = "early history summarized", SourceMessageCount = 2, SourceTokens = 240 });
+        completed.Compaction!.ThroughToolRunId.Should().BeNull("only the recorder knows the stored tool run");
         // The one place a local estimate is shown: the context really shrank and no provider has measured
         // the compacted prompt yet, so keeping the pre-compaction size would be worse than an approximation.
         var estimate = events.OfType<UsageProgressEvent>().Should().ContainSingle().Which;
@@ -56,8 +70,8 @@ public sealed class DirectInTurnCompactionTests
         var replayed = client.Requests[1];
         replayed[0].Role.Should().Be(ChatRole.System);
         replayed[0].Text.Should().Contain("selfclaw-context-summary").And.Contain("early history summarized");
-        replayed.Should().NotContain(message => message.Text == "prior prompt");
-        replayed.Should().NotContain(message => message.Text == "prior answer");
+        replayed.Should().NotContain(message => message.Text == LongPrompt);
+        replayed.Should().NotContain(message => message.Text == LongAnswer);
         replayed.Should().Contain(message => message.Text == "user prompt", "the retained tail stays verbatim");
         replayed.Should().Contain(message => message.Text == "AA");
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
@@ -115,13 +129,14 @@ public sealed class DirectInTurnCompactionTests
     }
 
     [Fact]
-    public async Task Retention_keeps_the_newest_units_within_half_the_threshold()
+    public async Task Retention_brings_the_whole_prompt_back_to_half_the_trigger()
     {
-        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 2));
+        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 4));
         var factory = CreateFactory(client);
-        var runtime = CreateRuntime(factory, policy: Policy(300));
-        // Threshold 300 retains at most 150 tokens: "BB" (42) + "AA" (42) + "user prompt" (31) + "x4" (22)
-        // = 137, and the next unit would cross it, so exactly the three oldest units are covered.
+        var runtime = CreateRuntime(factory, policy: Policy(330));
+        // The fourth round trip brings the prompt to 335, past the trigger of 330. Half of it (165) is what the
+        // compacted prompt may weigh, and the 48 tokens of instructions are part of that: 117 remain for
+        // history. "DD" (42) + "CC" (42) = 84 fit, "BB" would cross it, so the seven oldest units are covered.
         var history = new (MessageRole Role, string Text)[]
         {
             (MessageRole.User, "x1"),
@@ -132,15 +147,19 @@ public sealed class DirectInTurnCompactionTests
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id, history)));
 
-        events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
-            .Which.CoveredUnitCount.Should().Be(3);
-        var replayed = client.Requests[2];
-        replayed.Should().NotContain(message => message.Text == "x1");
-        replayed.Should().NotContain(message => message.Text == "x2");
-        replayed.Should().NotContain(message => message.Text == "x3");
-        replayed.Should().Contain(message => message.Text == "x4");
-        replayed.Should().Contain(message => message.Text == "user prompt");
-        replayed.Should().Contain(message => message.Text == "BB");
+        var completed = events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle().Subject;
+        completed.CoveredUnitCount.Should().Be(7);
+        // Four history messages, the prompt and two round trips of this turn's own assistant message: the stored
+        // boundary is the prompt's sequence, and the anchor says how far into the assistant message it reaches.
+        completed.AnchorCallId.Should().Be("call-2");
+        completed.Compaction.Should().BeEquivalentTo(new { ThroughSequence = 5L, SourceMessageCount = 6 });
+        var replayed = client.Requests[4];
+        replayed.Should().NotContain(message => message.Text == "x4");
+        replayed.Should().NotContain(message => message.Text == "user prompt");
+        replayed.Should().NotContain(message => message.Text == "AA");
+        replayed.Should().NotContain(message => message.Text == "BB");
+        replayed.Should().Contain(message => message.Text == "CC");
+        replayed.Should().Contain(message => message.Text == "DD");
     }
 
     [Fact]
@@ -153,7 +172,7 @@ public sealed class DirectInTurnCompactionTests
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
-        // The round trip alone is 190 tokens, so only it survives even though the target is 100.
+        // The round trip alone is 190 tokens, so only it survives even though 52 are left for history.
         events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
             .Which.CoveredUnitCount.Should().Be(3);
         var replayed = client.Requests[1];
@@ -165,20 +184,21 @@ public sealed class DirectInTurnCompactionTests
     [Fact]
     public async Task A_tool_call_and_its_result_are_removed_together()
     {
-        // 100-character answers make each round trip cost 140 tokens, so the retention target keeps only the
-        // newest two and the oldest round trip falls into the prefix.
-        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 3, answerLength: 100));
+        // 100-character answers make each round trip cost 140 tokens. The fourth brings the prompt to 703, past
+        // the trigger of 660; the 282 tokens left for history keep the newest two round trips, so the two
+        // oldest fall into the prefix with the replayed history.
+        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 4, answerLength: 100));
         var factory = CreateFactory(client);
-        var runtime = CreateRuntime(factory, policy: Policy(600));
+        var runtime = CreateRuntime(factory, policy: Policy(660));
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
         events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
-            .Which.CoveredUnitCount.Should().Be(4, "the oldest round trip is covered with the replayed history");
-        client.Requests.Should().HaveCount(4);
-        var replayed = client.Requests[3];
+            .Which.CoveredUnitCount.Should().Be(5, "the two oldest round trips are covered with the replayed history");
+        client.Requests.Should().HaveCount(5);
+        var replayed = client.Requests[4];
         replayed.SelectMany(message => message.Contents).OfType<FunctionCallContent>()
-            .Select(call => call.CallId).Should().Equal("call-2", "call-3");
+            .Select(call => call.CallId).Should().Equal("call-3", "call-4");
         AssertNoOrphanedCalls(replayed);
     }
 
@@ -205,6 +225,93 @@ public sealed class DirectInTurnCompactionTests
             message.Text == $"<selfclaw-context-summary version=\"1\">\n{client.SummaryText}\n</selfclaw-context-summary>");
         var lastSystemText = client.Requests[^1][0].Text ?? string.Empty;
         lastSystemText.Split("<selfclaw-context-summary").Should().HaveCount(2);
+
+        // However often the turn compacts, it rewrites one record, so the transcript shows one divider.
+        var records = events.OfType<InTurnContextCompactionCompletedEvent>()
+            .Select(completed => completed.Compaction).OfType<ConversationCompactionRecord>().ToArray();
+        records.Should().NotBeEmpty();
+        records.Select(record => record.Id).Distinct().Should().ContainSingle();
+        records.Select(record => record.SourceMessageCount).Should().BeInAscendingOrder(
+            "the coverage of one turn accumulates");
+    }
+
+    [Fact]
+    public async Task The_first_in_turn_compaction_folds_the_summary_the_turn_started_with_into_its_own()
+    {
+        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 1, answerLength: 300));
+        var factory = CreateFactory(client);
+        var runtime = CreateRuntime(factory, policy: Policy(600));
+        var request = CreateRequest(factory.Profile.Id, LongHistory());
+        // The stored boundary already covers the first history message.
+        var stored = new ConversationCompactionRecord(Guid.NewGuid(), request.ConversationId, Guid.NewGuid(), 1,
+            "stored summary", "test-model", 1, 120, 14, DateTimeOffset.UtcNow);
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(request with { Compression = stored }));
+
+        client.Requests[0][0].Text.Should().Contain("stored summary");
+        var completed = events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle().Subject;
+        client.SummaryCalls.Should().ContainSingle().Which.Should().Contain(message =>
+            message.Role == ChatRole.User &&
+            message.Text == "<selfclaw-context-summary version=\"1\">\nstored summary\n</selfclaw-context-summary>",
+            "a stored summary has to stand on its own, so the new one is written on top of the old one");
+        var system = client.Requests[1][0].Text ?? string.Empty;
+        system.Should().StartWith("Follow project instructions.\n\n", "the instructions keep their bytes");
+        system.Should().Contain("early history summarized").And.NotContain("stored summary");
+        system.Split("<selfclaw-context-summary").Should().HaveCount(2, "a request carries one summary");
+        completed.Compaction.Should().NotBeNull();
+        completed.Compaction!.Id.Should().NotBe(stored.Id, "the stored record of an earlier turn is never rewritten");
+        completed.Compaction.ThroughSequence.Should().BeGreaterThan(stored.ThroughSequence);
+    }
+
+    [Fact]
+    public async Task The_next_turn_replays_only_the_summary_and_what_followed_the_anchor()
+    {
+        var first = new ScriptedClient(ToolRoundsThenFinal(rounds: 4, answerLength: 100));
+        var factory = CreateFactory(first);
+        var request = CreateRequest(factory.Profile.Id);
+        var events = await CollectAsync(
+            CreateRuntime(factory, policy: Policy(660)).StreamTurnAsync(request));
+        events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
+            .Which.AnchorCallId.Should().Be("call-2");
+        var followUp = CreateFollowUpRequest(request, events, keepAnchor: true);
+
+        var second = new ScriptedClient([[Finish("final", ChatFinishReason.Stop, new TextContent("done"))]]);
+        var secondFactory = CreateFactory(second);
+        var secondEvents = await CollectAsync(CreateRuntime(secondFactory, policy: Policy(660))
+            .StreamTurnAsync(followUp with { ModelProfileId = secondFactory.Profile.Id }));
+
+        second.SummaryCalls.Should().BeEmpty("the turn starts from the context the previous turn ended with");
+        secondEvents.OfType<ContextCompactionStartedEvent>().Should().BeEmpty();
+        var replayed = second.Requests.Should().ContainSingle().Subject;
+        replayed[0].Text.Should().Contain("early history summarized");
+        replayed.Should().NotContain(message => message.Text == "prior prompt");
+        replayed.Should().NotContain(message => message.Text == "user prompt");
+        replayed.SelectMany(message => message.Contents).OfType<FunctionCallContent>()
+            .Select(call => call.CallId).Should().Equal(["call-3", "call-4"], "the first two round trips are summarized");
+        replayed.Select(message => message.Text).Should().ContainInOrder("done", "next prompt");
+        AssertNoOrphanedCalls(replayed);
+        secondEvents.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
+    }
+
+    [Fact]
+    public async Task Without_its_anchor_the_stored_summary_makes_the_next_turn_replay_the_whole_message_and_compact_again()
+    {
+        var first = new ScriptedClient(ToolRoundsThenFinal(rounds: 4, answerLength: 100));
+        var factory = CreateFactory(first);
+        var request = CreateRequest(factory.Profile.Id);
+        var events = await CollectAsync(
+            CreateRuntime(factory, policy: Policy(660)).StreamTurnAsync(request));
+        // What an unresolvable anchor degrades to: the boundary still holds, the assistant message replays whole.
+        var followUp = CreateFollowUpRequest(request, events, keepAnchor: false);
+
+        var second = new ScriptedClient([[Finish("final", ChatFinishReason.Stop, new TextContent("done"))]]);
+        var secondFactory = CreateFactory(second);
+        var secondEvents = await CollectAsync(CreateRuntime(secondFactory, policy: Policy(660))
+            .StreamTurnAsync(followUp with { ModelProfileId = secondFactory.Profile.Id }));
+
+        second.SummaryCalls.Should().ContainSingle("the whole assistant message is back in the prompt");
+        secondEvents.OfType<ContextCompactionCompletedEvent>().Should().ContainSingle();
+        secondEvents.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
     }
 
     [Fact]
@@ -212,7 +319,8 @@ public sealed class DirectInTurnCompactionTests
     {
         var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 1)) { SummaryText = null };
         var factory = CreateFactory(client);
-        var runtime = CreateRuntime(factory);
+        // The round trip brings the prompt to 185, past this trigger.
+        var runtime = CreateRuntime(factory, policy: Policy(180));
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id)));
 
@@ -268,10 +376,12 @@ public sealed class DirectInTurnCompactionTests
     [Fact]
     public async Task A_continuation_keeps_its_completion_batch_after_the_summary_without_a_continuation_prompt()
     {
-        var longAnswer = new string('A', 400);
-        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 1, answerLength: 400));
+        // The completion batch is counted from the turn start on, so the trigger sits well above the opening
+        // prompt (about a thousand tokens with the batch) and the round trip alone carries the turn past it.
+        var longAnswer = new string('A', 4_000);
+        var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 1, answerLength: 4_000));
         var factory = CreateFactory(client);
-        var runtime = CreateRuntime(factory, policy: Policy(700));
+        var runtime = CreateRuntime(factory, policy: Policy(3_000));
         var request = CreateRequest(
             factory.Profile.Id,
             history: [(MessageRole.User, "prior prompt"), (MessageRole.Assistant, "prior answer")],
@@ -282,6 +392,7 @@ public sealed class DirectInTurnCompactionTests
 
         var events = await CollectAsync(runtime.StreamTurnAsync(request));
 
+        events.OfType<ContextCompactionCompletedEvent>().Should().BeEmpty("the opening prompt is below the trigger");
         events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
             .Which.CoveredUnitCount.Should().Be(2);
         var replayed = client.Requests[1].ToList();
@@ -302,8 +413,10 @@ public sealed class DirectInTurnCompactionTests
     {
         var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 1));
         var factory = CreateFactory(client);
-        var runtime = CreateRuntime(factory);
-        var request = CreateRequest(factory.Profile.Id);
+        // The steer (30) is protected, so it counts with the instructions against the retained history: of
+        // the 155 a trigger of 310 leaves, 77 remain, which is the round trip and the prompt (73).
+        var runtime = CreateRuntime(factory, policy: Policy(310));
+        var request = CreateRequest(factory.Profile.Id, LongHistory());
         var session = new ScriptedInputSession(request.ConversationId, request.TurnId, [["steer text"]]);
         request = request with { InputSession = session };
 
@@ -314,7 +427,7 @@ public sealed class DirectInTurnCompactionTests
         events.OfType<InTurnContextCompactionCompletedEvent>().Should().ContainSingle()
             .Which.CoveredUnitCount.Should().Be(2, "a protected steer is never counted as a unit");
         var replayed = client.Requests[1].ToList();
-        replayed.Should().NotContain(message => message.Text == "prior prompt");
+        replayed.Should().NotContain(message => message.Text == LongPrompt);
         replayed.Select(message => message.Text)
             .Should().ContainInOrder("user prompt", "steer text", "AA");
     }
@@ -412,9 +525,10 @@ public sealed class DirectInTurnCompactionTests
     [Fact]
     public async Task An_image_on_the_opening_message_does_not_stop_in_turn_compaction()
     {
-        // 300-character answers make each round trip cost 340 tokens, and a 700 window at 0.9 puts the threshold
-        // at 630: the second round trip crosses it. The image-bearing opening message is the oldest unit, so
-        // only a summary that covers it brings the prompt back under the window.
+        // 300-character answers make each round trip cost 340 tokens. A 700 window at 0.9 asks for 630, but only
+        // 650 of it is usable input and the trigger stays at 90% of that (585): the second round trip crosses
+        // it. The image-bearing opening message is the oldest unit, so only a summary that covers it brings the
+        // prompt back under the window.
         var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 2, answerLength: 300));
         var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client, contextWindowTokens: 700)
         {
@@ -446,7 +560,7 @@ public sealed class DirectInTurnCompactionTests
     public async Task A_round_trip_that_read_an_image_is_summarized_once_it_leaves_the_retained_tail(
         AiProviderApiFormat format)
     {
-        // The first round trip reads an image; the second is large enough to cross the threshold of 600 and to
+        // The first round trip reads an image; the second is large enough to cross the trigger of 550 and to
         // fill the retained tail on its own. Both delivery shapes are covered: nested in the tool result
         // (Anthropic) and carried by the follow-up user message (Chat Completions).
         var client = new ScriptedClient(
@@ -464,7 +578,7 @@ public sealed class DirectInTurnCompactionTests
             Configuration = new AiModelConfiguration("test-model", "Test model",
                 new AiSamplingOptions(false, 0.7, false, 0.7), IsMultimodal: true)
         };
-        var runtime = CreateRuntime(factory, policy: Policy(600), lease: Lease(Probe(), ImageProbe()));
+        var runtime = CreateRuntime(factory, policy: Policy(550), lease: Lease(Probe(), ImageProbe()));
 
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory.Profile.Id, history: [])));
 
@@ -512,6 +626,9 @@ public sealed class DirectInTurnCompactionTests
     private static DirectCompressionPolicy Policy(int absoluteThresholdTokens)
         => new(Enabled: true, AbsoluteThresholdTokens: absoluteThresholdTokens);
 
+    private static (MessageRole Role, string Text)[] LongHistory()
+        => [(MessageRole.User, LongPrompt), (MessageRole.Assistant, LongAnswer)];
+
     private static DirectChatTurnRequest CreateRequest(
         Guid modelProfileId,
         IReadOnlyList<(MessageRole Role, string Text)>? history = null,
@@ -552,6 +669,76 @@ public sealed class DirectInTurnCompactionTests
             execution ?? new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null),
             ToolExecutionCheckpoint: checkpoint,
             InputSession: inputSession);
+    }
+
+    /// <summary>
+    /// The request the next turn is built from, stored the way the recorder stores a finished turn: one assistant
+    /// message whose segments follow the event order, one tool run per call, and the turn's in-turn compaction
+    /// with its anchor call resolved to that run.
+    /// </summary>
+    private static DirectChatTurnRequest CreateFollowUpRequest(
+        DirectChatTurnRequest previous,
+        IReadOnlyList<AgentStreamEvent> events,
+        bool keepAnchor)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var assistantId = Guid.NewGuid();
+        var sequence = previous.Messages.Max(message => message.Sequence);
+        var segments = new List<MessageSegmentRecord>();
+        var runs = new Dictionary<string, ToolExecutionRecord>(StringComparer.Ordinal);
+        foreach (var streamEvent in events)
+        {
+            switch (streamEvent)
+            {
+                case AssistantTextDeltaEvent text when segments is [.., { Kind: MessageSegmentKind.Text } last]:
+                    segments[^1] = last with { Text = last.Text + text.Delta };
+                    break;
+                case AssistantTextDeltaEvent text:
+                    segments.Add(new MessageSegmentRecord(assistantId, segments.Count, MessageSegmentKind.Text, text.Delta, null));
+                    break;
+                case ToolCallStartedEvent started:
+                    var run = new ToolExecutionRecord(Guid.NewGuid(), previous.ConversationId, started.ToolName,
+                        started.ArgumentsJson, ToolExecutionStatus.Running, null, started.ToolCallId, null, now, now,
+                        MessageId: assistantId);
+                    runs.Add(started.ToolCallId, run);
+                    segments.Add(new MessageSegmentRecord(assistantId, segments.Count, MessageSegmentKind.ToolCall, null, run.Id));
+                    break;
+                case ToolCallCompletedEvent completed:
+                    runs[completed.ToolCallId] = runs[completed.ToolCallId] with
+                    {
+                        Status = ToolExecutionStatus.Completed,
+                        ResultSummary = completed.ResultSummary,
+                        ResultContent = completed.ResultContent
+                    };
+                    break;
+            }
+        }
+
+        var inTurn = events.OfType<InTurnContextCompactionCompletedEvent>().Last();
+        var compaction = inTurn.Compaction ?? throw new InvalidOperationException("The turn stored no compaction.");
+        if (keepAnchor && inTurn.AnchorCallId is { } anchorCallId)
+        {
+            compaction = compaction with { ThroughToolRunId = runs[anchorCallId].Id };
+        }
+
+        var turnId = Guid.NewGuid();
+        var turns = previous.Turns
+            .Select(turn => turn.Id == previous.TurnId
+                ? turn with { Status = ConversationTurnStatus.Succeeded, CompletedAtUtc = now }
+                : turn)
+            .Append(new ConversationTurnRecord(turnId, previous.ConversationId, AgentExecutionMode.Direct,
+                DirectTurnOrigin.Interactive, ConversationTurnStatus.Running, now.AddMinutes(1)))
+            .ToArray();
+        MessageRecord[] messages =
+        [
+            .. previous.Messages,
+            new MessageRecord(assistantId, previous.ConversationId, previous.TurnId, sequence + 1, MessageRole.Assistant,
+                string.Empty, MessageStatus.Sealed, now, now, Segments: segments),
+            CreateMessage(previous.ConversationId, turnId, sequence + 2, MessageRole.User, "next prompt", now)
+        ];
+        return new DirectChatTurnRequest(turnId, previous.ConversationId, null, previous.Agent, messages, turns,
+            previous.ModelProfileId, ToolPermissionMode.FullAccess, null, previous.ExecutionContext,
+            ToolExecutions: runs.Values.ToArray(), Compression: compaction);
     }
 
     private static MessageRecord CreateMessage(Guid conversationId, Guid turnId, long sequence,

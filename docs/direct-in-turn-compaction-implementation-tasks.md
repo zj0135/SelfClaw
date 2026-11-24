@@ -5,6 +5,8 @@
 
 > **类型名对照（2026-11 Direct 重构）：** 正文保留实施当时的类型名。`DirectConversationLoop` → `DirectTurnRun`（每回合实例，`DirectTurnRunFactory` 创建）；`DirectPromptComposer` → `DirectHistoryReplay`（重放单元 / `Compose`）+ `DirectSystemPrompt`（system 文本 / 摘要段 / completion batch）+ `DirectCompactionPlanner`（`PlanCompression` / `ResolveThreshold`）；`DirectAgentChatRuntime.SetupTurnAsync` → `DirectTurnPreparer.PrepareAsync`；`ApplyCompactionAsync` / `TryCompactInTurnAsync` / `EnsurePromptFitsWindow` → `DirectCompactionStep`；`CountPromptTokens` → `DirectPromptMeter`；`MaximumInTurnCompactionsPerTurn` 现为 10（`DirectCompactionStep`），`MaximumProviderRequestsPerTurn` 现为 1024（`DirectTurnRun`）。
 
+> **已被 C23 修订的部分（2026-11-24）：** T1–T4 落地的是「零持久化」版本，正文保留当时的任务与验收原文。之后回合内压缩改为随回合终态落库（锚点列 `through_tool_run_id`，schema v33），摘要 section 从「追加在 system 文本末尾、与回合开始的摘要并存」改为「一个请求只有一个摘要 section」，触发判定不再把输出预留加到计数上，`ResolveThreshold` / `CreateSummarySection` / `JoinSections` 分别被 `ResolveTrigger` / `ComposeSystemText` 取代。当前行为以设计文档 §3.2、§5.2–§5.4 为准，实施记录见 `direct-context-compaction-implementation-tasks.md` 的 C23；正文里与之冲突的描述（不写库、不进转录、录制侧仅记日志）不再成立。
+
 ## 使用约定
 
 - **完成定义（每个任务通用 DoD）**：`dotnet build SelfClaw.slnx` 零新增警告；任务相关的定向 `dotnet test` 全绿（全量测试在报告里给出通过/失败/跳过数）。本特性零前端改动；若意外触及前端，另跑 `npm test` 与 `npm run build`。

@@ -46,10 +46,10 @@ internal sealed class DirectCompactionStep
 
     /// <summary>
     /// Decides and performs the turn-start compaction, before the first provider request so its summary is part
-    /// of that request. Returns the boundary the prompt replays against together with the system text and plan
-    /// section that were counted with it, so the request that is sized and the request that is sent cannot
-    /// disagree. A null measurement means counting is unavailable (or nothing needed counting) and the turn
-    /// degrades to an uncompacted, unchecked request (design §5.5).
+    /// of that request. Returns the boundary the prompt replays against together with the plan section that was
+    /// counted with it, so the request that is sized and the request that is sent cannot disagree. A null
+    /// measurement means counting is unavailable (or nothing needed counting) and the turn degrades to an
+    /// uncompacted, unchecked request (design §5.5).
     /// </summary>
     internal async Task<DirectTurnStartCompaction> CompactTurnStartAsync(
         DirectTurnCompaction input,
@@ -125,7 +125,7 @@ internal sealed class DirectCompactionStep
 
     /// <summary>
     /// The in-turn checkpoint (design §3.1), run before every request after the first: compact when the
-    /// context reached the threshold, then refuse a prompt that still cannot fit. A failed summary, unavailable
+    /// context reached the trigger, then refuse a prompt that still cannot fit. A failed summary, unavailable
     /// counting or an exhausted allowance never removes content; only a prompt over the declared window fails
     /// the turn, because sending it would come back as an opaque provider error. The window check runs every
     /// round, not only after a summary: once the allowance is spent nothing shrinks the prompt any more.
@@ -163,8 +163,9 @@ internal sealed class DirectCompactionStep
             var result = await SummarizeAsync(
                 new DirectCompressionRequest(
                     plan.PrefixUnits,
-                    // Already the bare summary: the compressor wraps it as the previous summary itself.
-                    context.InTurnSummary,
+                    // Already the bare summary: the compressor wraps it as the previous summary itself. It is
+                    // the request's only summary, so the new one stands for everything before the units left.
+                    context.Summary,
                     plan.SourceTokens ?? measured.PromptTokens,
                     setup.CompressionPolicy.ModelProfileId,
                     setup.ProviderLease,
@@ -208,9 +209,12 @@ internal sealed class DirectCompactionStep
     }
 
     // The only place the snapshot rule lives: a plan is worth a section exactly when the boundary this request
-    // replays against already swallowed the message that carried it.
-    internal static string? TodoSection(TodoPlanSnapshot? plan, ConversationCompactionRecord? compression)
-        => plan is { } snapshot && compression is { } boundary && snapshot.SourceSequence <= boundary.ThroughSequence
+    // replays against already swallowed the call that carried it.
+    internal static string? TodoSection(
+        TodoPlanSnapshot? plan,
+        IReadOnlyList<MessageRecord> messages,
+        ConversationCompactionRecord? compression)
+        => plan is { } snapshot && DirectHistoryReplay.IsCovered(messages, snapshot.Run, compression)
             ? TodoPlanSection.Build(snapshot.Plan)
             : null;
 
@@ -218,22 +222,15 @@ internal sealed class DirectCompactionStep
     private static DirectTurnStartCompaction DescribePrompt(
         DirectTurnCompaction input,
         ConversationCompactionRecord? boundary)
-        => new(
-            boundary,
-            Counted: null,
-            DirectSystemPrompt.BuildSystemText(
-                input.Request.Agent.Instructions,
-                input.CapabilityLease.SystemInstructions,
-                input.Request.ExecutionContext,
-                boundary),
-            TodoSection(input.PlanSnapshot, boundary));
+        => new(boundary, Counted: null, TodoSection(input.PlanSnapshot, input.Request.Messages, boundary));
 
     private DirectCountedPrompt? CountTurnStart(DirectTurnCompaction input, DirectTurnStartCompaction prompt)
         => _meter.CountTurnStartPrompt(
-            DirectSystemPrompt.JoinSections(prompt.SystemText, prompt.TodoSection),
+            DirectSystemPrompt.ComposeSystemText(input.FixedSystemText, prompt.Compression?.Summary, prompt.TodoSection),
             input.ProviderLease.Options.Tools,
             input.ProviderLease.Profile,
             input.Units,
+            input.TrailingProtectedMessages,
             prompt.Compression?.ThroughSequence ?? 0,
             DirectCompactionPlanner.ResolveOutputReserve(input.Budget.MaxOutputTokens));
 
@@ -273,9 +270,9 @@ internal sealed class DirectCompactionStep
         }
 
         // The planner makes the same comparison; it is repeated here only because sizing every unit is the
-        // expensive part and almost every round is below the threshold.
-        var threshold = DirectCompactionPlanner.ResolveThreshold(setup.CompressionPolicy, setup.Budget);
-        if (Math.Max(measured.TotalWithReserve, observedInputTokens ?? 0) < threshold)
+        // expensive part and almost every round is below the trigger.
+        var trigger = DirectCompactionPlanner.ResolveTrigger(setup.CompressionPolicy, setup.Budget);
+        if (Math.Max(measured.PromptTokens, observedInputTokens ?? 0) < trigger)
         {
             return null;
         }
@@ -331,12 +328,14 @@ internal sealed class DirectCompactionStep
     {
         // The bare summary goes in: the context owns the system-section shell, so a second compaction reuses
         // one format instead of nesting wrapped summaries.
-        context.ApplyInTurnCompaction(result.Summary, plan.PrefixUnits.Count);
+        var coverage = context.ApplyInTurnCompaction(result.Summary, plan.PrefixUnits.Count, result.SourceTokens);
         writer.TryWrite(new InTurnContextCompactionCompletedEvent(
             plan.PrefixUnits.Count,
             result.SourceTokens,
             result.SummaryTokens,
-            result.Model));
+            result.Model,
+            coverage is null ? null : CreateInTurnRecord(setup, context, coverage, result),
+            coverage?.AnchorCallId));
         var compacted = MeasureContext(setup, context);
         if (compacted is not null)
         {
@@ -346,6 +345,25 @@ internal sealed class DirectCompactionStep
 
         return compacted;
     }
+
+    // The record keeps the turn's one in-turn identity, so each later summary of the turn replaces it. It
+    // carries no anchor yet: the recorder resolves the call id to the tool run it stored.
+    private static ConversationCompactionRecord CreateInTurnRecord(
+        DirectTurnSetup setup,
+        DirectConversationContext context,
+        DirectInTurnCoverage coverage,
+        DirectCompressionResult result)
+        => new(
+            context.InTurnCompactionId,
+            setup.ConversationId,
+            setup.TurnId,
+            coverage.ThroughSequence,
+            result.Summary,
+            result.Model,
+            coverage.MessageCount,
+            coverage.SourceTokens,
+            result.SummaryTokens,
+            DateTimeOffset.UtcNow);
 
     private static void EnsureInTurnPromptFitsWindow(
         DirectPromptBudget budget,

@@ -20,4 +20,5 @@ internal sealed record TranscriptProjectionRequest(
     bool IsContinuation = false,
     IReadOnlyList<ConversationCompactionRecord>? Compactions = null,
     TranscriptLiveUsage? LiveUsage = null,
-    IReadOnlySet<Guid>? RunningConversationIds = null);
+    IReadOnlySet<Guid>? RunningConversationIds = null,
+    int? CompactionTriggerTokens = null);

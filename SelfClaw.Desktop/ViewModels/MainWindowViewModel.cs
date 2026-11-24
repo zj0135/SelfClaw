@@ -800,7 +800,8 @@ public sealed partial class MainWindowViewModel : ObservableObject, IDisposable,
             isContinuation,
             transcript.Compactions,
             isBusy ? _conversationSessions.SelectedLiveUsage : null,
-            runningConversationIds);
+            runningConversationIds,
+            _conversationSessions.SelectedCompactionTriggerTokens);
     }
 
     Guid? SelfClaw.Desktop.Services.Activities.IActivityPanelScopeSource.CaptureActivityParent()

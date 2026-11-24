@@ -17,9 +17,9 @@ internal static class AiChatOptions
     public const string MaxOutputTokensKey = "max_output_tokens";
 
     /// <summary>
-    /// Model option declaring the model's context window. It drives the Direct prompt history budget:
-    /// history is trimmed to leave room for the system prompt and the output reserve. When it is
-    /// unset, the full history is sent.
+    /// Model option declaring the model's context window. It sizes the Direct compaction trigger and the
+    /// window check that refuses a prompt which cannot fit; history is never trimmed silently. When it is
+    /// unset, compaction falls back to its absolute threshold and no window check runs.
     /// </summary>
     public const string ContextWindowTokensKey = "context_window_tokens";
 

@@ -24,7 +24,7 @@ internal static class SqliteMappings
 
     internal const string CompactionSelectColumns = """
         c.id, c.conversation_id, c.turn_id, c.through_sequence, c.summary, c.model,
-        c.source_message_count, c.source_tokens, c.summary_tokens, c.created_at_utc
+        c.source_message_count, c.source_tokens, c.summary_tokens, c.created_at_utc, c.through_tool_run_id
         """;
     public static AiProviderConnection ReadAiProviderConnection(SqliteDataReader reader)
         => new(
@@ -148,7 +148,8 @@ internal static class SqliteMappings
             reader.GetInt32(6),
             ReadNullableInt(reader, 7),
             ReadNullableInt(reader, 8),
-            ReadDateTimeOffset(reader, 9));
+            ReadDateTimeOffset(reader, 9),
+            reader.IsDBNull(10) ? null : ReadGuid(reader, 10));
 
     public static MessageAttachmentRecord ReadMessageAttachment(SqliteDataReader reader)
         => new(

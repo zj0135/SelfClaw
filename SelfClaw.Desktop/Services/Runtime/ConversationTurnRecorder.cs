@@ -119,6 +119,10 @@ internal sealed class ConversationTurnRecorder
                     session.ActivityText = MapRunStatusText(status.Status);
                     session.RaiseTranscriptChanged(false);
                     break;
+                case ContextCompactionTriggerResolvedEvent trigger:
+                    session.CompactionTriggerTokens = trigger.TriggerTokens;
+                    session.RaiseTranscriptChanged(false);
+                    break;
                 case ContextCompactionStartedEvent:
                     session.ActivityText = CompactingText;
                     session.RaiseTranscriptChanged(true);
@@ -134,12 +138,7 @@ internal sealed class ConversationTurnRecorder
                     session.RaiseTranscriptChanged(false);
                     break;
                 case InTurnContextCompactionCompletedEvent inTurn:
-                    // In-turn compaction only rewrites this turn's request context, so there is nothing to
-                    // persist, replay or show as a divider; the nearby RunStatus event owns the activity text.
-                    _logger.LogInformation(
-                        "In-turn context compaction covered {CoveredUnitCount} units for turn {TurnId}: " +
-                        "{SourceTokens} source tokens, {SummaryTokens} summary tokens, model {Model}.",
-                        inTurn.CoveredUnitCount, turn.TurnId, inTurn.SourceTokens, inTurn.SummaryTokens, inTurn.Model);
+                    ApplyInTurnCompaction(session, turn, inTurn);
                     break;
                 case RunCompletedEvent completed:
                     await CompleteTurnAsync(session, turn, completed, committer, cancellationToken);
@@ -169,6 +168,29 @@ internal sealed class ConversationTurnRecorder
     {
         session.LiveUsage = new TranscriptLiveUsage(turn.TurnId, progress.Usage, progress.IsEstimated);
         session.RaiseTranscriptChanged(false);
+    }
+
+    /// <summary>
+    /// Keeps the turn's in-turn compaction for its terminal commit, so the next turn replays against the summary
+    /// instead of this turn's whole assistant message. The runtime names the last covered tool call by call id;
+    /// the stored run behind it is only known here. A call that cannot be resolved leaves the record without an
+    /// anchor, which only makes the next turn replay more than it has to.
+    /// </summary>
+    private void ApplyInTurnCompaction(ConversationRuntimeState session, AgentTurnState turn,
+        InTurnContextCompactionCompletedEvent inTurn)
+    {
+        _logger.LogInformation(
+            "In-turn context compaction covered {CoveredUnitCount} units for turn {TurnId}: " +
+            "{SourceTokens} source tokens, {SummaryTokens} summary tokens, model {Model}.",
+            inTurn.CoveredUnitCount, turn.TurnId, inTurn.SourceTokens, inTurn.SummaryTokens, inTurn.Model);
+        if (inTurn.Compaction is not { } compaction) return;
+        if (inTurn.AnchorCallId is { } callId && turn.ToolRunsByCallId.TryGetValue(callId, out var anchor))
+            compaction = compaction with { ThroughToolRunId = anchor.Id };
+        // One turn keeps one in-turn record: each later summary of the turn replaces the earlier one.
+        turn.PendingCompactions.RemoveAll(item => item.Id == compaction.Id);
+        turn.PendingCompactions.Add(compaction);
+        session.ReplaceCompaction(compaction);
+        session.RaiseTranscriptChanged(true);
     }
 
     private async Task ApplyDeltaAsync(ConversationRuntimeState session, AgentTurnState turn,

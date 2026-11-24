@@ -26,8 +26,8 @@ public sealed class TodoPlanSectionTests
     [Fact]
     public void A_turn_without_a_plan_keeps_its_system_text_byte_for_byte()
     {
-        var systemText = DirectSystemPrompt.BuildSystemText(
-            AgentInstructions, ["capability instructions"], Interactive(), compression: null);
+        var systemText = DirectSystemPrompt.BuildFixedText(
+            AgentInstructions, ["capability instructions"], Interactive());
 
         var context = new DirectConversationContext(systemText, [TextUnit(1, "history")], [], planSection: null);
 
@@ -38,8 +38,8 @@ public sealed class TodoPlanSectionTests
     [Fact]
     public void A_blank_section_leaves_no_separator_behind()
     {
-        DirectSystemPrompt.JoinSections(AgentInstructions, "  \n ", null).Should().Be(AgentInstructions);
-        DirectSystemPrompt.JoinSections(null, " ").Should().BeNull();
+        DirectSystemPrompt.ComposeSystemText(AgentInstructions, null, "  \n ").Should().Be(AgentInstructions);
+        DirectSystemPrompt.ComposeSystemText(null, null, " ").Should().BeNull();
     }
 
     [Fact]
@@ -128,34 +128,58 @@ public sealed class TodoPlanSectionTests
     [Fact]
     public void The_section_follows_every_section_the_turn_started_with()
     {
-        // The plan is the one section that can change mid-turn, so it goes last: replacing it never rewrites
+        // The plan is the section that changes most often mid-turn, so it goes last: replacing it never rewrites
         // the summary or the capability sections in front of it.
-        var systemText = DirectSystemPrompt.BuildSystemText(
+        var fixedText = DirectSystemPrompt.BuildFixedText(
             AgentInstructions,
             ["first capability", "second capability"],
-            Interactive(),
-            CreateCompaction(throughSequence: 3));
-        var context = new DirectConversationContext(systemText, [], [], TodoPlanSection.Build(SamplePlan()));
+            Interactive());
+        var context = new DirectConversationContext(
+            fixedText, [], [], TodoPlanSection.Build(SamplePlan()), summary: Summary);
 
         var text = context.Messages[0].Text ?? string.Empty;
-        text.Should().StartWith(systemText);
-        text.IndexOf(Heading, StringComparison.Ordinal).Should().BeGreaterThan(
+        text.Should().StartWith(fixedText, "a summary never moves the instructions in front of it");
+        text.IndexOf("<selfclaw-context-summary", StringComparison.Ordinal).Should().BeGreaterThan(
             text.IndexOf("second capability", StringComparison.Ordinal));
-        text.Should().Be(DirectSystemPrompt.JoinSections(systemText, TodoPlanSection.Build(SamplePlan())),
+        text.IndexOf(Heading, StringComparison.Ordinal).Should().BeGreaterThan(
+            text.IndexOf("</selfclaw-context-summary>", StringComparison.Ordinal));
+        text.Should().Be(
+            DirectSystemPrompt.ComposeSystemText(fixedText, Summary, TodoPlanSection.Build(SamplePlan())),
             "the turn start counts exactly this text");
     }
 
     [Fact]
     public void Turn_start_injects_the_plan_only_when_the_boundary_covers_it()
     {
-        var snapshot = new TodoPlanSnapshot(SamplePlan(), CreateRun(), SourceSequence: 5);
+        var (messages, snapshot, _) = PlanHistory(sequence: 5);
 
-        DirectCompactionStep.TodoSection(snapshot, CreateCompaction(throughSequence: 5)).Should().Be(
+        DirectCompactionStep.TodoSection(snapshot, messages, CreateCompaction(throughSequence: 5)).Should().Be(
             TodoPlanSection.Build(SamplePlan()), "the boundary includes the message that carried the plan");
-        DirectCompactionStep.TodoSection(snapshot, CreateCompaction(throughSequence: 4)).Should().BeNull(
+        DirectCompactionStep.TodoSection(snapshot, messages, CreateCompaction(throughSequence: 4)).Should().BeNull(
             "the plan is still replayed from the history");
-        DirectCompactionStep.TodoSection(snapshot, compression: null).Should().BeNull("nothing was summarized");
-        DirectCompactionStep.TodoSection(plan: null, CreateCompaction(throughSequence: 9)).Should().BeNull();
+        DirectCompactionStep.TodoSection(snapshot, messages, compression: null).Should().BeNull("nothing was summarized");
+        DirectCompactionStep.TodoSection(plan: null, messages, CreateCompaction(throughSequence: 9)).Should().BeNull();
+    }
+
+    [Fact]
+    public void Turn_start_injects_a_plan_an_in_turn_boundary_covered_inside_its_message()
+    {
+        // The message itself is still replayed (sequence 5 lies after the boundary), but the summary reaches
+        // into it: a plan written before the anchored call is gone from the prompt, one written after is not.
+        var (messages, snapshot, laterRunId) = PlanHistory(sequence: 5);
+        var boundary = CreateCompaction(throughSequence: 4);
+
+        DirectCompactionStep.TodoSection(snapshot, messages, boundary with { ThroughToolRunId = laterRunId })
+            .Should().Be(TodoPlanSection.Build(SamplePlan()), "the anchor lies behind the call that carried the plan");
+        DirectCompactionStep.TodoSection(snapshot, messages, boundary with { ThroughToolRunId = snapshot.Run.Id })
+            .Should().Be(TodoPlanSection.Build(SamplePlan()), "the anchored call itself is covered");
+        DirectCompactionStep.TodoSection(snapshot, messages, boundary with { ThroughToolRunId = Guid.NewGuid() })
+            .Should().BeNull("an anchor that resolves to no call of the message covers nothing");
+
+        var (earlier, laterSnapshot, _) = PlanHistory(sequence: 5, planOrdinal: 2, otherOrdinal: 1);
+        var earlierRunId = earlier[0].Segments!.Single(segment => segment.Ordinal == 1).ToolRunId;
+        DirectCompactionStep.TodoSection(laterSnapshot, earlier, boundary with { ThroughToolRunId = earlierRunId })
+            .Should().BeNull("a plan written after the anchor is still replayed");
     }
 
     [Fact]
@@ -197,7 +221,7 @@ public sealed class TodoPlanSectionTests
     public void An_in_turn_snapshot_equal_to_the_turn_start_one_is_not_repeated()
     {
         var context = new DirectConversationContext(
-            TurnStartSystemText(), [SamePlanUnit(2)], [], TodoPlanSection.Build(SamplePlan()));
+            AgentInstructions, [SamePlanUnit(2)], [], TodoPlanSection.Build(SamplePlan()), summary: Summary);
 
         context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
 
@@ -210,7 +234,7 @@ public sealed class TodoPlanSectionTests
     public void A_newer_plan_covered_in_turn_replaces_the_turn_start_snapshot()
     {
         var context = new DirectConversationContext(
-            TurnStartSystemText(), [TodoUnit(2)], [], TodoPlanSection.Build(SamplePlan()));
+            AgentInstructions, [TodoUnit(2)], [], TodoPlanSection.Build(SamplePlan()), summary: Summary);
 
         context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
 
@@ -224,8 +248,8 @@ public sealed class TodoPlanSectionTests
     public void A_finished_plan_covered_in_turn_removes_the_older_snapshot()
     {
         var context = new DirectConversationContext(
-            TurnStartSystemText(), [FinishedPlanUnit(2), TextUnit(3, "newest")], [],
-            TodoPlanSection.Build(SamplePlan()));
+            AgentInstructions, [FinishedPlanUnit(2), TextUnit(3, "newest")], [],
+            TodoPlanSection.Build(SamplePlan()), summary: Summary);
 
         context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
 
@@ -238,7 +262,7 @@ public sealed class TodoPlanSectionTests
     {
         var planSection = TodoPlanSection.Build(SamplePlan());
         var context = new DirectConversationContext(
-            TurnStartSystemText(), [TextUnit(2, "oldest"), FinishedPlanUnit(3)], [], planSection);
+            AgentInstructions, [TextUnit(2, "oldest"), FinishedPlanUnit(3)], [], planSection, summary: Summary);
 
         context.ApplyInTurnCompaction("in-turn summary", coveredUnitCount: 1);
 
@@ -299,9 +323,6 @@ public sealed class TodoPlanSectionTests
     private static DirectPromptHistoryUnit FinishedPlanUnit(long sequence)
         => new([TodoCall(PlanArguments(("新增 todo_write 工具", "completed")))], sequence);
 
-    private static string? TurnStartSystemText()
-        => DirectSystemPrompt.BuildSystemText(AgentInstructions, [], Interactive(), CreateCompaction(throughSequence: 1));
-
     private static DirectPromptHistoryUnit TextUnit(long sequence, string text)
         => new([new ChatMessage(ChatRole.Assistant, text)], sequence);
 
@@ -317,12 +338,24 @@ public sealed class TodoPlanSectionTests
             Summary, "test-model", 1, 10, 5, now);
     }
 
-    // The section only reads the plan, the run id rides along for callers that cache on it.
-    private static ToolExecutionRecord CreateRun()
+    // One assistant message holding the plan call and one other call, in the given order. The section only
+    // reads the plan; the runs and segments are what decide whether a boundary covers it.
+    private static (MessageRecord[] Messages, TodoPlanSnapshot Snapshot, Guid OtherRunId) PlanHistory(
+        long sequence, int planOrdinal = 1, int otherOrdinal = 2)
     {
         var now = DateTimeOffset.UtcNow;
-        return new ToolExecutionRecord(Guid.NewGuid(), Guid.NewGuid(), TodoPlanRules.ToolName, "{\"todos\":[]}",
-            ToolExecutionStatus.Completed, null, null, null, now, now);
+        var conversationId = Guid.NewGuid();
+        var messageId = Guid.NewGuid();
+        var planRun = new ToolExecutionRecord(Guid.NewGuid(), conversationId, TodoPlanRules.ToolName, "{\"todos\":[]}",
+            ToolExecutionStatus.Completed, null, null, null, now, now, MessageId: messageId);
+        var otherRunId = Guid.NewGuid();
+        var message = new MessageRecord(messageId, conversationId, Guid.NewGuid(), sequence, MessageRole.Assistant,
+            string.Empty, MessageStatus.Sealed, now, now, Segments:
+            [
+                new MessageSegmentRecord(messageId, planOrdinal, MessageSegmentKind.ToolCall, null, planRun.Id),
+                new MessageSegmentRecord(messageId, otherOrdinal, MessageSegmentKind.ToolCall, null, otherRunId)
+            ]);
+        return ([message], new TodoPlanSnapshot(SamplePlan(), planRun, sequence), otherRunId);
     }
 
     private static DirectTurnExecutionContext Interactive() => new(DirectTurnOrigin.Interactive, null, null);

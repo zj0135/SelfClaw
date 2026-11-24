@@ -332,7 +332,7 @@ public sealed class ConversationTurnRecorderTests
     }
 
     [Fact]
-    public async Task In_turn_compaction_completion_is_observation_only()
+    public async Task An_in_turn_compaction_without_a_record_leaves_the_transcript_untouched()
     {
         using var context = new ConversationTurnTestContext();
         await context.StartAsync();
@@ -341,17 +341,93 @@ public sealed class ConversationTurnRecorderTests
         var immediates = new List<bool>();
         context.State.TranscriptChanged += immediates.Add;
 
+        // No record: the summary covers something a stored boundary cannot express, so it stays request-only.
         await context.ApplyAsync(new InTurnContextCompactionCompletedEvent(CoveredUnitCount: 4, SourceTokens: 88_000,
             SummaryTokens: 700, Model: "summary-model"));
 
         context.Turn.PendingCompactions.Should().BeEmpty();
         context.State.Compactions.Should().BeEmpty();
         context.State.ActivityText.Should().Be(activity);
-        immediates.Should().BeEmpty("an in-turn compaction leaves the transcript untouched");
+        immediates.Should().BeEmpty();
 
         await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
 
-        (await context.ListCompactionsAsync()).Should().BeEmpty("an in-turn compaction is never persisted");
+        (await context.ListCompactionsAsync()).Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task An_in_turn_compaction_is_stored_with_the_tool_run_its_anchor_call_resolved_to()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "read_file", "{}", ToolCallKind.Read));
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read file", "contents"));
+        var compaction = Compaction(context, throughSequence: 1, "in-turn summary");
+        var immediates = new List<bool>();
+        context.State.TranscriptChanged += immediates.Add;
+
+        await context.ApplyAsync(new InTurnContextCompactionCompletedEvent(2, 4_200, 120, "test-model", compaction, "call-1"));
+
+        var anchorRunId = context.Turn.ToolRunsByCallId["call-1"].Id;
+        var expected = compaction with { ThroughToolRunId = anchorRunId };
+        immediates.Should().Equal([true], "the divider appears as soon as the summary exists");
+        context.State.Compactions.Should().ContainSingle().Which.Should().Be(expected);
+
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        (await context.ListCompactionsAsync()).Should().ContainSingle().Which.Should().BeEquivalentTo(expected);
+    }
+
+    [Fact]
+    public async Task A_later_in_turn_compaction_of_the_same_turn_replaces_the_earlier_record()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        await context.ApplyAsync(new ToolCallStartedEvent("call-1", "read_file", "{}", ToolCallKind.Read));
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-1", ToolCallStatus.Completed, "read file", "contents"));
+        await context.ApplyAsync(new ToolCallStartedEvent("call-2", "read_file", "{}", ToolCallKind.Read));
+        await context.ApplyAsync(new ToolCallCompletedEvent("call-2", ToolCallStatus.Completed, "read file", "contents"));
+        var first = Compaction(context, throughSequence: 1, "first summary");
+        var second = first with { Summary = "second summary", SourceTokens = 9_000 };
+
+        await context.ApplyAsync(new InTurnContextCompactionCompletedEvent(2, 4_200, 120, "test-model", first, "call-1"));
+        await context.ApplyAsync(new InTurnContextCompactionCompletedEvent(1, 4_800, 130, "test-model", second, "call-2"));
+
+        var expected = second with { ThroughToolRunId = context.Turn.ToolRunsByCallId["call-2"].Id };
+        context.Turn.PendingCompactions.Should().ContainSingle().Which.Should().Be(expected);
+        context.State.Compactions.Should().ContainSingle().Which.Should().Be(expected);
+
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        (await context.ListCompactionsAsync()).Should().ContainSingle().Which.Should().BeEquivalentTo(expected);
+    }
+
+    [Fact]
+    public async Task An_anchor_call_the_recorder_never_saw_stores_the_record_without_an_anchor()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var compaction = Compaction(context, throughSequence: 1, "in-turn summary");
+
+        await context.ApplyAsync(new InTurnContextCompactionCompletedEvent(2, 4_200, 120, "test-model", compaction, "unknown-call"));
+        await context.ApplyAsync(new RunCompletedEvent(RunCompletionStatus.Succeeded, "done"));
+
+        // Without the anchor the next turn replays the whole assistant message again, which is only slower.
+        (await context.ListCompactionsAsync()).Should().ContainSingle()
+            .Which.ThroughToolRunId.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task The_resolved_compaction_trigger_is_kept_on_the_runtime_state_only()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        context.State.CompactionTriggerTokens.Should().BeNull();
+
+        await context.ApplyAsync(new ContextCompactionTriggerResolvedEvent(524_288));
+
+        context.State.CompactionTriggerTokens.Should().Be(524_288);
+        context.State.Compactions.Should().BeEmpty();
     }
 
     private static ConversationCompactionRecord Compaction(ConversationTurnTestContext context, long throughSequence, string summary)

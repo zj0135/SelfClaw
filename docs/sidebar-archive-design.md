@@ -1,6 +1,6 @@
 # 侧栏「归档」分组设计
 
-> 适用范围：`SelfClaw.TranscriptVue` 左侧会话区的分组结构。宿主（WPF）只增加一个字段，不迁移 schema（仍 v32）。
+> 适用范围：`SelfClaw.TranscriptVue` 左侧会话区的分组结构。宿主（WPF）只增加一个字段，不改 schema。
 
 ## 1. 结论
 

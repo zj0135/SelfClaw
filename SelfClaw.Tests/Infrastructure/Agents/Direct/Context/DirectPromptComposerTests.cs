@@ -200,7 +200,7 @@ public sealed class DirectPromptComposerTests
     }
 
     [Fact]
-    public void Prompt_injects_the_summary_as_the_third_system_section()
+    public void Prompt_injects_the_summary_after_the_fixed_system_sections()
     {
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "oldest"),
@@ -212,14 +212,15 @@ public sealed class DirectPromptComposerTests
 
         var system = result[0];
         system.Role.Should().Be(ChatRole.System);
-        system.Text.Should().StartWith("agent instructions\n\nThis is a compressed summary of earlier conversation");
-        system.Text.Should().Contain("<selfclaw-context-summary version=\"1\">\nearlier decisions\n</selfclaw-context-summary>");
-        system.Text.Should().EndWith("capability instructions", "capability instructions stay behind the summary");
+        system.Text.Should().StartWith(
+            "agent instructions\n\ncapability instructions\n\nThis is a compressed summary of earlier conversation",
+            "the instructions keep their bytes whether or not a summary follows them");
+        system.Text.Should().EndWith("<selfclaw-context-summary version=\"1\">\nearlier decisions\n</selfclaw-context-summary>");
         result.Skip(1).Select(message => message.Text).Should().Equal("latest");
     }
 
     [Fact]
-    public void Prompt_places_the_summary_after_the_completion_instruction()
+    public void Prompt_keeps_the_fixed_sections_byte_identical_when_a_summary_is_added()
     {
         var (messages, turns, runs) = CreateHistory(
             ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "oldest"),
@@ -227,15 +228,71 @@ public sealed class DirectPromptComposerTests
         var compression = CreateCompaction(messages[0].Sequence);
         var context = new DirectTurnExecutionContext(DirectTurnOrigin.Continuation, null, CreateCompletionBatch());
 
-        var result = DirectPromptAssembly.Flatten(messages, turns, runs, "agent instructions",
-            ["capability instructions"], NoAdjustments(), context, compression: compression);
+        var uncompacted = DirectPromptAssembly.Flatten(messages, turns, runs, "agent instructions",
+            ["capability instructions"], NoAdjustments(), context)[0].Text;
+        var compacted = DirectPromptAssembly.Flatten(messages, turns, runs, "agent instructions",
+            ["capability instructions"], NoAdjustments(), context, compression: compression)[0].Text;
 
-        var system = result[0].Text;
-        system.IndexOf("completed Subagent results", StringComparison.Ordinal).Should().BePositive();
-        system.IndexOf("<selfclaw-context-summary", StringComparison.Ordinal)
-            .Should().BeGreaterThan(system.IndexOf("completed Subagent results", StringComparison.Ordinal));
-        system.IndexOf("capability instructions", StringComparison.Ordinal)
-            .Should().BeGreaterThan(system.IndexOf("<selfclaw-context-summary", StringComparison.Ordinal));
+        uncompacted.IndexOf("completed Subagent results", StringComparison.Ordinal).Should().BePositive();
+        uncompacted.Should().EndWith("capability instructions");
+        compacted.Should().StartWith(uncompacted + "\n\n",
+            "a compaction appends its summary and never rewrites the prefix a provider may have cached");
+        compacted.Should().Contain("<selfclaw-context-summary");
+    }
+
+    [Fact]
+    public void BuildUnits_replays_only_what_follows_the_anchored_tool_call()
+    {
+        var (messages, turns, runs) = CreateHistory(
+            ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "list the files"),
+            ("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "first step"));
+        AddToolCallSegment(messages, 1, runs, CreateRun());
+        AddTextSegment(messages, 1, "second step");
+        AddToolCallSegment(messages, 1, runs, CreateRun() with { CorrelationId = "call-2" });
+        AddTextSegment(messages, 1, "final answer");
+        // The boundary ends at the user message; the anchor reaches into the assistant message after it.
+        var compression = CreateCompaction(messages[0].Sequence) with { ThroughToolRunId = runs[0].Id };
+
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, runs, NoAdjustments(), compression: compression);
+
+        var unit = units.Should().HaveCount(2).And.Subject.Last();
+        unit.SourceSequence.Should().Be(messages[1].Sequence, "the shortened message is still one unit");
+        unit.Messages.Select(message => message.Role)
+            .Should().Equal(ChatRole.Assistant, ChatRole.Tool, ChatRole.Assistant);
+        unit.Messages[0].Text.Should().Be("second step", "the text and the call before the anchor are summarized");
+        unit.Messages[0].Contents.OfType<FunctionCallContent>().Should().ContainSingle()
+            .Which.CallId.Should().Be("call-2");
+        unit.Messages[2].Text.Should().Be("final answer");
+    }
+
+    [Fact]
+    public void BuildUnits_drops_a_message_the_anchor_covers_to_its_end()
+    {
+        var (messages, turns, runs) = CreateHistory(
+            ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "list the files"),
+            ("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "working"));
+        AddToolCallSegment(messages, 1, runs, CreateRun());
+        var compression = CreateCompaction(messages[0].Sequence) with { ThroughToolRunId = runs[0].Id };
+
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, runs, NoAdjustments(), compression: compression);
+
+        units.Should().ContainSingle().Which.SourceSequence.Should().Be(messages[0].Sequence);
+    }
+
+    [Fact]
+    public void BuildUnits_replays_the_whole_message_when_the_anchor_resolves_to_no_call()
+    {
+        var (messages, turns, runs) = CreateHistory(
+            ("user", MessageRole.User, ConversationTurnStatus.Succeeded, "list the files"),
+            ("assistant", MessageRole.Assistant, ConversationTurnStatus.Succeeded, "working"));
+        AddToolCallSegment(messages, 1, runs, CreateRun());
+        var compression = CreateCompaction(messages[0].Sequence) with { ThroughToolRunId = Guid.NewGuid() };
+
+        var units = DirectHistoryReplay.BuildUnits(messages, turns, runs, NoAdjustments(), compression: compression);
+
+        // A dangling anchor is a soft reference like the sequence boundary: it costs a longer replay, never a turn.
+        units.Should().HaveCount(2);
+        units[1].Messages.Should().HaveCount(2, "the call and its result replay as if no anchor were set");
     }
 
     [Fact]
@@ -290,19 +347,84 @@ public sealed class DirectPromptComposerTests
         units[1].Messages[1].Contents.Should().ContainSingle().Which.Should().BeOfType<FunctionResultContent>();
     }
 
-    [Fact]
-    public void PlanCompression_counts_the_output_reserve_toward_the_trigger()
+    [Theory]
+    [InlineData(3600, true)]
+    [InlineData(3400, false)]
+    public void PlanCompression_caps_the_trigger_at_the_usable_input_space(int countedTokens, bool expected)
     {
-        var units = CountedUnits(3000, 2000);
+        var units = CountedUnits(countedTokens - 2000, 2000);
 
-        // threshold = 6000 (8000 * 0.75) and the default reserve is 4096: the prompt alone (5000) sits under
-        // the threshold, but 5000 + 4096 would exceed the 8000 window, so compaction has to start here.
+        // The window asks for 6000 (8000 * 0.75), but the default reserve of 4096 leaves only 3904 of it for
+        // input and the trigger stays at 90% of that. A prompt below 3513 still fits; one above it has to be
+        // compacted although it is nowhere near the configured share.
         var plan = DirectCompactionPlanner.PlanCompression(units, null,
-            new DirectCompressionPolicy(), new DirectPromptBudget(8000, null), countedTokens: 5000);
+            new DirectCompressionPolicy(), new DirectPromptBudget(8000, null), countedTokens);
+
+        plan.ShouldCompress.Should().Be(expected);
+        plan.ThresholdTokens.Should().Be(3513);
+    }
+
+    // The two profiles the repeated compaction was reported with: an output cap that is more than a third of the
+    // window. Adding it to the count put the trigger at 13% and 11% of the window, below the 25% a compaction
+    // retains, so a compacted prompt was compacted again on every round trip.
+    [Theory]
+    [InlineData(1_048_576, 384_000, 524_288)]
+    [InlineData(1_000_000, 393_216, 500_000)]
+    public void PlanCompression_keeps_the_trigger_at_the_configured_share_whatever_the_output_cap(
+        int window, int maxOutputTokens, int expectedTrigger)
+    {
+        var policy = new DirectCompressionPolicy(ThresholdRatio: 0.5d);
+        var budget = new DirectPromptBudget(window, maxOutputTokens);
+        var units = CountedUnits(Enumerable.Repeat(9_000, 30).ToArray());
+
+        // 270,000 of history and 15,000 of instructions: a quarter of the window, far below the trigger.
+        var plan = DirectCompactionPlanner.PlanCompression(units, null, policy, budget, countedTokens: 285_000);
+
+        plan.ShouldCompress.Should().BeFalse();
+        plan.ThresholdTokens.Should().Be(expectedTrigger);
+    }
+
+    [Fact]
+    public void PlanCompression_leaves_a_compacted_prompt_room_to_grow()
+    {
+        var policy = new DirectCompressionPolicy(ThresholdRatio: 0.5d);
+        var budget = new DirectPromptBudget(1_048_576, 384_000);
+        const int Instructions = 15_000;
+        const int SummaryTokens = 4_096;
+        var units = CountedUnits(Enumerable.Repeat(9_000, 60).ToArray());
+
+        var plan = DirectCompactionPlanner.PlanCompression(units, null, policy, budget,
+            countedTokens: Instructions + (60 * 9_000));
+
+        // The prompt is brought back to half the trigger as a whole: 262,144 less the instructions leaves
+        // 247,144 for history, which is 27 units.
+        plan.ShouldCompress.Should().BeTrue();
+        plan.PrefixUnits.Should().HaveCount(33);
+        var retained = units.Skip(33).ToArray();
+
+        // Three more round trips arrive. The prompt is at 289,096, well under the trigger of 524,288.
+        var grown = retained.Concat(CountedUnits(9_000, 9_000, 9_000)
+                .Select((unit, index) => unit with { SourceSequence = 1_000 + index }))
+            .ToArray();
+        var next = DirectCompactionPlanner.PlanCompression(grown, null, policy, budget,
+            countedTokens: Instructions + SummaryTokens + (30 * 9_000));
+
+        next.ShouldCompress.Should().BeFalse("a compaction has to buy room, not leave the prompt at the trigger");
+    }
+
+    [Fact]
+    public void PlanCompression_takes_what_a_summary_cannot_replace_out_of_the_retained_history()
+    {
+        var units = CountedUnits(Enumerable.Repeat(50, 8).ToArray());
+
+        // trigger = 300, so the compacted prompt may weigh 150. The count carries 60 tokens beyond the units
+        // (instructions, tool definitions), which stay in the prompt: 90 remain for history, a single unit.
+        var plan = DirectCompactionPlanner.PlanCompression(units, null,
+            new DirectCompressionPolicy(), Window(400), countedTokens: 460);
 
         plan.ShouldCompress.Should().BeTrue();
-        plan.ThroughSequence.Should().Be(units[0].SourceSequence);
-        plan.SourceTokens.Should().Be(3000);
+        plan.PrefixUnits.Should().HaveCount(7);
+        plan.ThroughSequence.Should().Be(units[6].SourceSequence);
     }
 
     [Fact]
@@ -545,5 +667,13 @@ public sealed class DirectPromptComposerTests
         segments.Add(new MessageSegmentRecord(message.Id, segments.Count, MessageSegmentKind.ToolCall, null, run.Id));
         messages[messageIndex] = message with { Segments = segments };
         return run;
+    }
+
+    private static void AddTextSegment(List<MessageRecord> messages, int messageIndex, string text)
+    {
+        var message = messages[messageIndex];
+        var segments = (message.Segments ?? []).ToList();
+        segments.Add(new MessageSegmentRecord(message.Id, segments.Count, MessageSegmentKind.Text, text, null));
+        messages[messageIndex] = message with { Segments = segments };
     }
 }

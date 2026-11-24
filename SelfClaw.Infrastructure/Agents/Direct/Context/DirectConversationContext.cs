@@ -16,38 +16,54 @@ namespace SelfClaw.Infrastructure.Agents.Direct.Context;
 internal sealed class DirectConversationContext
 {
     // One entry is either a unit (compressible, ordered by SourceSequence) or a protected message.
-    // Both live in one list so the composed order is exactly the order they were added in.
-    private sealed record ContextEntry(IReadOnlyList<ChatMessage> Messages, long SourceSequence, bool IsProtected);
+    // Both live in one list so the composed order is exactly the order they were added in. IsStored tells
+    // the entries a stored message stands behind (a replayed unit, a consumed steer) from the ones that
+    // exist only in this turn's request (a response the recorder is still writing, the completion batch).
+    private sealed record ContextEntry(
+        IReadOnlyList<ChatMessage> Messages,
+        long SourceSequence,
+        bool IsProtected,
+        bool IsStored);
 
-    private readonly string? _systemText;
+    private readonly string? _fixedText;
     private readonly List<ContextEntry> _entries;
+    private readonly long _historyThroughSequence;
     private long _nextUnitSequence;
-    private string? _inTurnSummary;
+    private string? _summary;
     private string? _planSection;
     private IReadOnlyList<ChatMessage> _messages = [];
     private int _countedMessageCount;
     private int _countedTokens;
+    private long _coveredThroughSequence;
+    private string? _coveredAnchorCallId;
+    private int _coveredMessageCount;
+    private int? _coveredSourceTokens = 0;
+    private bool _coverageClosed;
 
     internal DirectConversationContext(
-        string? systemText,
+        string? fixedText,
         IReadOnlyList<DirectPromptHistoryUnit> initialUnits,
         IReadOnlyList<ChatMessage> trailingProtectedMessages,
-        string? planSection = null)
+        string? planSection = null,
+        string? summary = null,
+        long historyThroughSequence = 0)
     {
         ArgumentNullException.ThrowIfNull(initialUnits);
         ArgumentNullException.ThrowIfNull(trailingProtectedMessages);
-        _systemText = systemText;
+        _fixedText = fixedText;
         // The section the turn start decided on. It stays until an in-turn compaction covers a newer plan.
         _planSection = planSection;
+        _summary = summary;
+        _historyThroughSequence = historyThroughSequence;
         _entries = new List<ContextEntry>(initialUnits.Count + trailingProtectedMessages.Count);
         foreach (var unit in initialUnits)
         {
-            _entries.Add(new ContextEntry(unit.Messages, unit.SourceSequence, IsProtected: false));
+            _entries.Add(new ContextEntry(unit.Messages, unit.SourceSequence, IsProtected: false, IsStored: true));
         }
 
         foreach (var message in trailingProtectedMessages)
         {
-            _entries.Add(new ContextEntry([message], 0, IsProtected: true));
+            _entries.Add(new ContextEntry([message], 0, IsProtected: true, IsStored: false));
         }
 
         _nextUnitSequence = NextUnitSequence(initialUnits);
@@ -57,11 +73,18 @@ internal sealed class DirectConversationContext
     public IReadOnlyList<ChatMessage> Messages => _messages;
 
     /// <summary>
-    /// The summary text this turn already produced, or null before its first in-turn compaction. It is the
+    /// The one summary this request carries, or null while nothing was ever compacted: the stored or
+    /// turn-start summary the turn began with, until an in-turn compaction folds it into its own. It is the
     /// bare text, not the wrapped section: a chained compaction hands it back to the compressor as the
-    /// previous summary, which wraps it itself, exactly like the turn-start compaction record does.
+    /// previous summary, which wraps it itself.
     /// </summary>
-    public string? InTurnSummary => _inTurnSummary;
+    public string? Summary => _summary;
+
+    /// <summary>
+    /// The identity of this turn's in-turn compaction record. One turn keeps a single one: every later
+    /// in-turn summary rewrites it, so the transcript shows one divider however often the turn compacted.
+    /// </summary>
+    public Guid InTurnCompactionId { get; } = Guid.NewGuid();
 
     /// <summary>
     /// Counts the history once and then only what was appended since. The loop asks whether the next
@@ -103,7 +126,8 @@ internal sealed class DirectConversationContext
     public void AppendResponse(ChatResponse response)
     {
         // One response opens one unit: compaction boundaries may only fall between round trips.
-        _entries.Add(new ContextEntry([.. response.Messages], _nextUnitSequence++, IsProtected: false));
+        _entries.Add(new ContextEntry(
+            [.. response.Messages], _nextUnitSequence++, IsProtected: false, IsStored: false));
         Recompose();
     }
 
@@ -140,7 +164,7 @@ internal sealed class DirectConversationContext
             // the model must still see it after any later compaction, and only the next turn's turn-start
             // compaction may fold it into a summary.
             _entries.Add(new ContextEntry([BuildInputMessage(message, attachmentContents?.GetValueOrDefault(message.Id))],
-                0, IsProtected: true));
+                message.Sequence, IsProtected: true, IsStored: true));
         }
 
         Recompose();
@@ -148,10 +172,12 @@ internal sealed class DirectConversationContext
 
     /// <summary>
     /// Drops the oldest <paramref name="coveredUnitCount"/> units and installs <paramref name="summary"/> in
-    /// their place. Protected messages keep their position, and a second compaction in the same turn replaces
-    /// the summary instead of stacking another one on top of it.
+    /// their place. Protected messages keep their position, and the summary replaces the one the request
+    /// carried instead of stacking another one on top of it. Returns what a stored compaction can say this
+    /// turn covers now, or null when this compaction moved nothing a stored boundary can express: the summary
+    /// then lives in this request only and the next turn replays what it covered.
     /// </summary>
-    public void ApplyInTurnCompaction(string summary, int coveredUnitCount)
+    public DirectInTurnCoverage? ApplyInTurnCompaction(string summary, int coveredUnitCount, int? sourceTokens = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(summary);
         var units = _entries.Count(entry => !entry.IsProtected);
@@ -171,6 +197,7 @@ internal sealed class DirectConversationContext
             _planSection = TodoPlanSection.Build(coveredPlan);
         }
 
+        var coverage = AdvanceCoverage(coveredUnitCount, sourceTokens);
         var removed = 0;
         for (var index = 0; index < _entries.Count && removed < coveredUnitCount;)
         {
@@ -184,11 +211,82 @@ internal sealed class DirectConversationContext
             removed++;
         }
 
-        _inTurnSummary = summary;
+        _summary = summary;
         // The composed list no longer matches the tally, so the next CountTokens rebuilds it from scratch.
         _countedMessageCount = 0;
         _countedTokens = 0;
         Recompose();
+        return coverage;
+    }
+
+    // Walks the prefix about to be removed in prompt order and moves the boundary a stored compaction can
+    // express. A stored boundary is one message sequence plus one tool call inside the message after it, so it
+    // cannot step over a consumed steer: that message stays in the prompt while units on both sides of it go.
+    // From there on the turn's summaries are request-only, and the stored record keeps the last summary whose
+    // coverage it could describe.
+    private DirectInTurnCoverage? AdvanceCoverage(int coveredUnitCount, int? sourceTokens)
+    {
+        var advanced = false;
+        var remaining = coveredUnitCount;
+        foreach (var entry in _entries)
+        {
+            if (remaining == 0 || _coverageClosed)
+            {
+                break;
+            }
+
+            if (entry.IsProtected)
+            {
+                // The completion batch is never stored, so it does not sit between two stored messages.
+                _coverageClosed = entry.IsStored;
+                continue;
+            }
+
+            remaining--;
+            advanced |= entry.IsStored ? CoverStoredUnit(entry) : CoverInTurnUnit(entry);
+        }
+
+        if (!advanced || _coveredThroughSequence <= 0)
+        {
+            return null;
+        }
+
+        _coveredSourceTokens = _coveredSourceTokens is int total && sourceTokens is int added ? total + added : null;
+        return new DirectInTurnCoverage(
+            _coveredThroughSequence, _coveredAnchorCallId, _coveredMessageCount, _coveredSourceTokens);
+    }
+
+    private bool CoverStoredUnit(ContextEntry entry)
+    {
+        _coveredThroughSequence = entry.SourceSequence;
+        _coveredMessageCount++;
+        return true;
+    }
+
+    // The units a turn grows by all belong to the one assistant message the recorder is writing, so covering
+    // one means every message stored before the turn began is covered, and the tool call that ends the unit
+    // marks how far into that message the summary reaches. A response without a call has nothing to anchor
+    // on; the next turn simply replays its text.
+    private bool CoverInTurnUnit(ContextEntry entry)
+    {
+        var advanced = _coveredThroughSequence < _historyThroughSequence;
+        _coveredThroughSequence = Math.Max(_coveredThroughSequence, _historyThroughSequence);
+        var callId = entry.Messages
+            .SelectMany(message => message.Contents)
+            .OfType<FunctionCallContent>()
+            .LastOrDefault()?.CallId;
+        if (string.IsNullOrWhiteSpace(callId))
+        {
+            return advanced;
+        }
+
+        if (_coveredAnchorCallId is null)
+        {
+            _coveredMessageCount++;
+        }
+
+        _coveredAnchorCallId = callId;
+        return true;
     }
 
     // Only the newest plan of the turn decides: a newer todo_write in a retained unit is still in the history,
@@ -220,7 +318,9 @@ internal sealed class DirectConversationContext
     private void Recompose()
     {
         var composed = new List<ChatMessage>();
-        if (ComposeSystemText() is { } systemText)
+        // The sections that can change mid-turn go after the fixed text, so that text keeps its exact byte
+        // layout (and the provider's prefix cache) however often the summary or the plan is replaced.
+        if (DirectSystemPrompt.ComposeSystemText(_fixedText, _summary, _planSection) is { } systemText)
         {
             composed.Add(new ChatMessage(ChatRole.System, systemText));
         }
@@ -232,14 +332,6 @@ internal sealed class DirectConversationContext
 
         _messages = composed;
     }
-
-    // The sections that can change mid-turn go after the text the turn started with, so that text keeps its
-    // exact byte layout (and the provider's prefix cache) however often the summary or the plan is replaced.
-    private string? ComposeSystemText()
-        => DirectSystemPrompt.JoinSections(
-            _systemText,
-            _inTurnSummary is null ? null : DirectSystemPrompt.CreateSummarySection(_inTurnSummary),
-            _planSection);
 
     // In-turn units are identified by a synthetic sequence because the recorder owns the stored message
     // sequences. Compaction only ever considers units with a positive one, so the counter starts above the

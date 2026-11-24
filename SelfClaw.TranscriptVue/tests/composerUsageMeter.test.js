@@ -95,4 +95,52 @@ describe('ComposerUsageMeter', () => {
 		mountWithUsage(null);
 		expect(wrapper.find('.usage-pill').exists()).toBe(false);
 	});
+
+	describe('compaction trigger', () => {
+		// 本机复现配置：窗口 1,048,576，比例 0.5，触发点 524,288，压缩后读数落在 25%。
+		const triggered = (overrides = {}) => usage({
+			contextTokens: 262_144, contextWindowTokens: 1_048_576, compactionTriggerTokens: 524_288, ...overrides,
+		});
+
+		function pushPolicy(policy) {
+			const [, handler] = bridge.on.mock.calls.findLast(([type]) => type === 'direct-compression/state');
+			handler({ policy });
+		}
+
+		afterEach(() => pushPolicy({ enabled: true }));
+
+		it('marks the trigger on the ring and on the bar, with its size spelled out', () => {
+			mountWithUsage(triggered());
+
+			expect(wrapper.get('.usage-pill-text').text()).toBe('25%');
+			// 50% 在环的正对面：svg 整体旋转了 -90°，这里是旋转前的坐标。
+			expect(wrapper.get('.usage-ring-trigger').attributes()).toMatchObject({ x1: '4.7', y1: '10', x2: '0.3', y2: '10' });
+			expect(wrapper.get('.progress-bar-trigger').attributes('style')).toContain('left: 50%');
+			const row = wrapper.get('.trigger-row').text();
+			expect(row).toContain('自动压缩');
+			expect(row).toContain('524.29K');
+			expect(row).toContain('50%');
+			expect(wrapper.get('.usage-pill').attributes('title')).toContain('自动压缩 524.29K');
+		});
+
+		it('draws no mark while the host has not resolved a trigger', () => {
+			mountWithUsage(triggered({ compactionTriggerTokens: null }));
+
+			expect(wrapper.find('.usage-ring-trigger').exists()).toBe(false);
+			expect(wrapper.find('.progress-bar-trigger').exists()).toBe(false);
+			expect(wrapper.find('.trigger-row').exists()).toBe(false);
+			expect(wrapper.get('.usage-pill').attributes('title')).not.toContain('自动压缩');
+		});
+
+		it('removes the mark as soon as compaction is switched off in settings', async () => {
+			mountWithUsage(triggered());
+			expect(wrapper.find('.usage-ring-trigger').exists()).toBe(true);
+
+			pushPolicy({ enabled: false });
+			await flushPromises();
+
+			expect(wrapper.find('.usage-ring-trigger').exists()).toBe(false);
+			expect(wrapper.find('.trigger-row').exists()).toBe(false);
+		});
+	});
 });

@@ -18,7 +18,11 @@ internal sealed record DirectTurnSetup(
     DirectTurnCapabilityLease CapabilityLease,
     AiChatClientLease ProviderLease,
     DirectToolInvoker Invoker,
-    string? SystemText,
+    /// <summary>
+    /// The system sections that stay byte-identical for the whole turn. The summary and the plan are kept
+    /// apart because an in-turn compaction replaces them.
+    /// </summary>
+    string? FixedSystemText,
     IReadOnlyList<DirectPromptHistoryUnit> InitialUnits,
     IReadOnlyList<ChatMessage> TrailingProtectedMessages,
     DirectCompressionPolicy CompressionPolicy,
@@ -32,7 +36,15 @@ internal sealed record DirectTurnSetup(
     /// </summary>
     ToolImageDelivery ImageDelivery = ToolImageDelivery.Unsupported,
     /// <summary>
-    /// The plan section the turn starts with. It is kept apart from <see cref="SystemText"/> because it is the
-    /// one section an in-turn compaction may replace or drop. Null when the turn start injected none.
+    /// The plan section the turn starts with. Null when the turn start injected none.
     /// </summary>
-    string? PlanSection = null);
+    string? PlanSection = null,
+    /// <summary>
+    /// The summary the turn starts with: the one of the boundary <see cref="InitialUnits"/> replay against.
+    /// </summary>
+    string? Summary = null,
+    /// <summary>
+    /// The highest message sequence stored when the turn started. Once an in-turn compaction has covered every
+    /// initial unit, this is how far the stored history is covered.
+    /// </summary>
+    long HistoryThroughSequence = 0);

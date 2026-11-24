@@ -2,11 +2,11 @@
 
 > 状态：**已实施**（P1–P4 全部落地；后端 1796 用例、前端 352 用例通过）。
 >
-> 基线：schema **v32**、`DirectTurnCapabilityResolver` 汇总 bindings、`tool_runs.arguments_json` 全量落库、`TranscriptProjection` 整包推送渲染状态。
+> 基线：schema v32（设计时；现为 v33，本设计没有改 schema）、`DirectTurnCapabilityResolver` 汇总 bindings、`tool_runs.arguments_json` 全量落库、`TranscriptProjection` 整包推送渲染状态。
 >
 > 范围：Direct 运行时的计划工具、计划派生、prompt 注入、转录两者（dock 与内联卡片）。CLI 模式不在范围内。
 >
-> 前置约束：**不新增表、不改 schema**。非 v32 数据库只读拒绝，任何迁移都会让现有用户库不可用。
+> 前置约束：**不新增表、不改 schema**。非当前版本的数据库只读拒绝，任何 schema 变更都会让现有用户库不可用。
 
 ---
 
@@ -66,7 +66,7 @@ todo_write(整表替换)
 
 - `tool_runs` 已随回合提交事务写入，且 `arguments_json` **不截断**（`ToolResultTextLimits` 只作用于工具结果文本）。
 - 会话删除、回合级联删除天然覆盖计划生命周期，不需要额外清理逻辑。
-- schema 仍是 v32，用户现有数据库不需要迁移。
+- 不改 schema，用户现有数据库不受影响。
 
 代价：每次读取要扫一遍该会话的工具记录。`FindLatest` 在投影里按引用缓存（见 §6.2），在 `DirectTurnPreparer.PrepareAsync` 里每回合一次，成本可忽略。
 
@@ -292,12 +292,16 @@ else                          { arguments = { elided: true }; resultText = Elide
 
 **唯一判定：最新一份合法计划位于压缩边界之内（已被 summary 覆盖）。**
 
+「位于边界之内」的判定只有一个入口 `DirectHistoryReplay.IsCovered`（`DirectCompactionStep.TodoSection` 调用）：承载计划的那次 `todo_write` 所在消息在 `ThroughSequence` 之前，**或者**它就在回合内压缩的锚点所在消息里、且段序号不晚于锚点（`ThroughToolRunId`，见 `direct-context-compaction-design.md` §4.1）。只按整消息粒度判断会漏掉后一种：上一回合的回合内压缩把计划吞进了摘要，而那条消息的 sequence 仍在边界之后，下一回合既不重放这次调用、也不注入快照，计划就凭空消失了。
+
 | 场景 | 注入 |
 | --- | --- |
 | 没有压缩 | 否 |
 | 计划写在压缩边界之后（仍在 history 里） | 否 |
 | 计划被 turn-start 压缩覆盖 | 是 |
 | 计划被 in-turn 压缩覆盖 | 是 |
+| 计划被**上一回合**的 in-turn 压缩覆盖（落库记录的锚点在它之后） | 是 |
+| 计划在锚点所在消息里、但在锚点之后 | 否（仍在重放） |
 | 计划在压缩边界之前，但之后又有新的 `todo_write` | 否（新计划在 history 里） |
 
 推论：**没有压缩的回合，system 文本与今天逐字节相同**。这是可以直接断言的强性质。
@@ -308,9 +312,8 @@ else                          { arguments = { elided: true }; resultText = Elide
 
 ```
 [agent instructions]
-[compression summary]
 [capability sections]
-[in-turn summary]            仅回合内压缩之后
+[compression summary]        一个请求只有一个，来自落库记录 / 回合开始压缩 / 回合内压缩
 [SelfClaw Plan]
 The task plan as it stood when the history above was summarized. A newer todo_write in the history supersedes it.
 - [x] 检查 Direct 工具装配
@@ -318,7 +321,7 @@ The task plan as it stood when the history above was summarized. A newer todo_wr
 - [ ] 投影到 transcript 卡片
 ```
 
-- 放最后的原因：它是唯一会在回合内被替换或撤掉的段。夹在中间时，回合开始的那一份被烤进起始文本、回合内无法替换，只能再追加一份，于是出现新旧两个 `[SelfClaw Plan]`。现在起始文本（`DirectSystemPrompt.BuildSystemText`）不含计划段，`DirectConversationContext` 持有唯一的 `_planSection` 并在合成时接在最后，替换它不改写前面任何字节。
+- 放最后的原因：摘要与计划是仅有的两段会在回合内被替换或撤掉的内容。夹在中间时，回合开始的那一份被烤进起始文本、回合内无法替换，只能再追加一份，于是出现新旧两个 `[SelfClaw Plan]`。现在固定文本（`DirectSystemPrompt.BuildFixedText`）不含摘要与计划，`DirectConversationContext` 持有唯一的 `_summary` 与 `_planSection`，合成时经 `DirectSystemPrompt.ComposeSystemText` 依次接在固定文本之后，替换它们不改写前面任何字节。
 
 - 快照语义：**不随新的 `todo_write` 更新**。更新意味着又一次改变 system → 又一次前缀失效，而新计划本来就在 history 里。
 - 只在存在未完成项时注入；全部完成不注入（没有「继续做」的价值）。
@@ -331,9 +334,9 @@ The task plan as it stood when the history above was summarized. A newer todo_wr
 ```csharp
 var plan = TodoPlanHistory.FindLatest(request.Messages, request.ToolExecutions ?? []);
 // 计数与最终请求必须用同一个 compression 求同一个 section
-var prompt = DescribePrompt(input, boundary);   // (boundary, BuildSystemText(..., boundary), TodoSection(plan, boundary))
-CountTurnStart(input, prompt);                  // 计数 JoinSections(prompt.SystemText, prompt.TodoSection)
-// 压缩成功后对新的 boundary 再走一遍；DirectTurnPreparer 直接发送返回值里的 SystemText 与 TodoSection，不再自己重建
+var prompt = DescribePrompt(input, boundary);   // (boundary, TodoSection(plan, messages, boundary))
+CountTurnStart(input, prompt);                  // 计数 ComposeSystemText(input.FixedSystemText, boundary?.Summary, prompt.TodoSection)
+// 压缩成功后对新的 boundary 再走一遍；DirectTurnPreparer 直接发送返回值里的摘要与 TodoSection，不再自己重建
 ```
 
 `DirectPromptMeter.CountTurnStartPrompt`（经 `DirectCompactionStep.CountTurnStart`）在压缩前后各调用一次（分别对应 `request.Compression` 与新产生的 `compression`），两次都必须按各自传入的 boundary 计算 section，否则 `EnsureTurnStartPromptFitsWindow` 算出的尺寸与真实请求不一致。
@@ -365,7 +368,7 @@ if (FindCoveredPlan(coveredUnitCount) is { } coveredPlan)   // 最新计划在�
 
 | 断言 | 方法 |
 | --- | --- |
-| 无压缩 + 有计划 → system 文本不变 | 单测比较 `BuildSystemText` 输出字符串 |
+| 无压缩 + 有计划 → system 文本不变 | 单测比较 `ComposeSystemText` 输出字符串 |
 | 压缩未覆盖计划 → 不出现 section | 单测 |
 | 缓存命中率不受影响 | 实测同一会话连续回合的 `cached_input_tokens`：无压缩回合应与加功能前一致 |
 
@@ -489,7 +492,7 @@ styles/todo-plan.css                         共享视觉，scoped 内 @import
 - `TodoPlanReplayElisionTests`：最新合法计划完整回放；更早快照被替换为占位且 call/result 仍配对；失败的最新快照也被裁剪、上一条合法计划保持完整；清空计划（空数组）保持完整；裁剪后 `BuildUnits` 的 token 数小于裁剪前。
 - `DirectTurnCapabilityResolverTests`：Interactive/Continuation 绑定；Subagent/Automation 不绑定；`read-only` 放行、`none` 拒绝；无工作区时仍绑定。
 - `TodoPlanSectionTests`（P4）：无压缩 → 无 section；压缩未覆盖 → 无；覆盖 → 精确文本；turn-start 与 in-turn 文本相同 → 只一份；不同 → 按序两份。
-- `DirectPromptComposerTests`：无压缩时 `BuildSystemText` 与无计划版本**字节相等**。
+- `DirectPromptComposerTests`：无压缩时 `ComposeSystemText` 与无计划版本**字节相等**。
 
 **Desktop**
 
@@ -512,7 +515,7 @@ styles/todo-plan.css                         共享视觉，scoped 内 @import
 | P1 | Core 模型/规则 + `TodoToolset` + `ToolCallKind.Plan` + 策略与绑定 | 真实 Direct 回合能调用；非法列表得到可读错误；单测绿 |
 | P2 | `TodoPlanHistory` + 回放裁剪 + 投影（segment kind、state `todo`、引用缓存） | 历史/刷新/切会话正确；无额外推送；回放裁剪生效；Desktop 测试绿 |
 | P3 | 前端 dock + 内联卡片 + composable/renderer/样式/动效/可达性 | 视觉验收；Vitest + e2e 绿 |
-| P4 | 惰性快照注入（turn-start + in-turn）+ 活动文案 + 文档 | `BuildSystemText` 字节相等断言；压缩覆盖后模型仍能看到计划；`docs/direct-todo-plan-design.md` 状态改为已实施 |
+| P4 | 惰性快照注入（turn-start + in-turn）+ 活动文案 + 文档 | `ComposeSystemText` 字节相等断言；压缩覆盖后模型仍能看到计划；`docs/direct-todo-plan-design.md` 状态改为已实施 |
 
 实施结果：
 
@@ -533,7 +536,7 @@ styles/todo-plan.css                         共享视觉，scoped 内 @import
    `{"arguments":{...}}`，把 `arguments_json` 包一层，导致所有按 `{"todos":[...]}` 解析的读取方（工具、派生、回放裁剪）全部失效。
    测试用 schema 断言锁死（`properties.todos.type == "array"`）。
 
-P4 收尾**不新增 `AGENTS.md` 规则**：`AGENTS.md` 已有「数据库 schema v32，非 v32 只读拒绝，绝不迁移」，加表必须先改版本，该约束已经覆盖本设计最危险的误操作；其余内容都能从 `docs/` 与代码推出。
+P4 收尾**不新增 `AGENTS.md` 规则**：`AGENTS.md` 已有「非当前 schema 版本只读拒绝，绝不迁移」，加表必须先改版本，该约束已经覆盖本设计最危险的误操作；其余内容都能从 `docs/` 与代码推出。
 
 同时把 `AgentActivityCoordinator.MapToolHeadline` 与 `PetActivityPresenter` 的 `ToolCallKind.Plan` 归到「正在更新任务计划」（宠物行为落到默认 `Working`，不变）。
 
@@ -550,5 +553,5 @@ P4 收尾**不新增 `AGENTS.md` 规则**：`AGENTS.md` 已有「数据库 schem
 | 5 | 字段 | `content` / `status` / `activeForm`，不加 priority |
 | 6 | 工具名 | `todo_write` |
 | 7 | in-turn 压缩覆盖 | 也注入（成本为零，不补就是明确缺口） |
-| 8 | 独立表 | 不做（schema 必须保持 v32） |
+| 8 | 独立表 | 不做（不为计划改 schema） |
 | 9 | 历史回放裁剪 | 做（B）：只保留最新一份合法计划的完整参数，更早快照替换为占位 |

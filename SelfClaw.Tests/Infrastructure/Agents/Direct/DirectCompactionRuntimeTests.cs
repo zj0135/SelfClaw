@@ -27,10 +27,10 @@ public sealed class DirectCompactionRuntimeTests
 
     /// <summary>
     /// The threshold the measurement tests decide against. The deterministic counter sizes the prompt at 123
-    /// (system text 28, units 32 + 32 + 31) and the reserve adds 50, so the local trigger value of 173 stays
-    /// below it while the units alone (95) still exceed the retention target of 90.
+    /// (system text 28, units 32 + 32 + 31), which stays below it. Once a measurement starts the compaction,
+    /// half of the threshold (92) less the system text leaves 64 for history: the two newest units (31 + 32).
     /// </summary>
-    private const int MeasuredThreshold = 180;
+    private const int MeasuredThreshold = 184;
 
     /// <summary>No declared window and a small absolute threshold: the trigger is decided without a budget.</summary>
     private static DirectCompressionPolicy TriggeringPolicy()
@@ -91,10 +91,14 @@ public sealed class DirectCompactionRuntimeTests
         events.IndexOf(compactionEvents[0]).Should().BeLessThan(events.IndexOf(compactionEvents[1]));
         events.OfType<ContextCompactionFailedEvent>().Should().BeEmpty();
 
-        // The started event reports the prompt size without the output reserve (design §8.1).
+        // The started event reports the prompt size the trigger was compared with (design §8.1).
         var started = (ContextCompactionStartedEvent)compactionEvents[0];
         started.EstimatedTokens.Should().BePositive();
         started.ThresholdTokens.Should().Be(10);
+        // The mark the usage meter draws and the size the decision was made against are one number.
+        var trigger = events.OfType<ContextCompactionTriggerResolvedEvent>().Should().ContainSingle().Which;
+        trigger.TriggerTokens.Should().Be(started.ThresholdTokens);
+        events.IndexOf(trigger).Should().BeLessThan(events.IndexOf(started));
 
         var completed = (ContextCompactionCompletedEvent)compactionEvents[1];
         completed.Compaction.Id.Should().NotBe(Guid.Empty);
@@ -161,6 +165,8 @@ public sealed class DirectCompactionRuntimeTests
         var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory)));
 
         events.OfType<ContextCompactionStartedEvent>().Should().BeEmpty();
+        events.OfType<ContextCompactionTriggerResolvedEvent>().Should().BeEmpty(
+            "a turn that never compacts has no trigger for the meter to mark");
         client.Invocations.Should().BeEmpty();
         var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Which;
         terminal.Status.Should().Be(RunCompletionStatus.Failed);
@@ -307,10 +313,10 @@ public sealed class DirectCompactionRuntimeTests
         var events = await CollectAsync(MeasuredRuntime(factory).StreamTurnAsync(request));
 
         var started = events.OfType<ContextCompactionStartedEvent>().Should().ContainSingle().Which;
-        started.EstimatedTokens.Should().Be(123, "the event keeps reporting the local, reserve-free count");
+        started.EstimatedTokens.Should().Be(123, "the event keeps reporting the local count");
         started.ThresholdTokens.Should().Be(MeasuredThreshold);
         // The measurement only decides whether to compact. The prefix is still sized by the unit counts: the
-        // retention target of 90 keeps the two newest units (31 + 32).
+        // 64 tokens left for history keep the two newest units (31 + 32).
         events.OfType<ContextCompactionCompletedEvent>().Should().ContainSingle()
             .Which.Compaction.ThroughSequence.Should().Be(MessageOf(request, "prior prompt").Sequence);
         var sent = client.Invocations.Should().ContainSingle().Subject;
@@ -350,8 +356,8 @@ public sealed class DirectCompactionRuntimeTests
             };
         });
 
-    // The prompt counts 173 with its reserve against a threshold of 180, so nothing but a qualifying
-    // measurement can start a compaction here.
+    // The prompt counts 123 against a threshold of 184, so nothing but a qualifying measurement can start a
+    // compaction here.
     private static async Task AssertTheLocalCountDecidesAsync(Func<DirectChatTurnRequest, DirectChatTurnRequest> shape)
     {
         var client = new TurnClient([[Finish("m1", ChatFinishReason.Stop, new TextContent("done"))]])

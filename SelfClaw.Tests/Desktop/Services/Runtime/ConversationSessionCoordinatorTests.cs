@@ -158,6 +158,50 @@ public sealed class ConversationSessionCoordinatorTests
     }
 
     [Fact]
+    public async Task The_compaction_trigger_of_the_last_turn_stays_visible_between_turns()
+    {
+        using var context = new Context();
+        var conversation = Conversation();
+        context.Repository.Source(conversation.Id).SetResult([]);
+        await context.Sessions.SelectAsync(conversation.Id);
+        context.Sessions.SelectedCompactionTriggerTokens.Should().BeNull("no turn has run since the app started");
+
+        var handle = context.Reserve(conversation);
+        var state = await context.Sessions.PrepareRuntimeStateAsync(conversation, false);
+        context.Runs.AttachState(handle, state);
+        state.CompactionTriggerTokens = 524_288;
+        context.Sessions.SelectedCompactionTriggerTokens.Should().Be(524_288, "the running turn resolved it");
+        context.Runs.Complete(handle, true);
+
+        context.Sessions.SelectedCompactionTriggerTokens.Should().Be(524_288,
+            "the meter keeps its mark while the conversation waits for the next message");
+
+        // A turn that resolved none (compaction switched off) must not leave the older mark behind.
+        var next = context.Reserve(conversation);
+        context.Runs.AttachState(next, await context.Sessions.PrepareRuntimeStateAsync(conversation, false));
+        context.Runs.Complete(next, true);
+        context.Sessions.SelectedCompactionTriggerTokens.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Forgetting_a_transcript_forgets_its_compaction_trigger()
+    {
+        using var context = new Context();
+        var conversation = Conversation();
+        context.Repository.Source(conversation.Id).SetResult([]);
+        await context.Sessions.SelectAsync(conversation.Id);
+        var handle = context.Reserve(conversation);
+        var state = await context.Sessions.PrepareRuntimeStateAsync(conversation, false);
+        context.Runs.AttachState(handle, state);
+        state.CompactionTriggerTokens = 96_000;
+        context.Runs.Complete(handle, true);
+
+        context.Sessions.ForgetTranscript(conversation.Id);
+
+        context.Sessions.SelectedCompactionTriggerTokens.Should().BeNull();
+    }
+
+    [Fact]
     public void Turn_only_changes_invalidate_content_snapshots_without_creating_an_assistant()
     {
         var conversation = Conversation();

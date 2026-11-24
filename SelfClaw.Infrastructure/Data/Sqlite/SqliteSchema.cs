@@ -399,6 +399,7 @@ internal static class SqliteSchema
             source_tokens INTEGER NULL,
             summary_tokens INTEGER NULL,
             created_at_utc TEXT NOT NULL,
+            through_tool_run_id TEXT NULL,
             FOREIGN KEY(conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
             FOREIGN KEY(turn_id) REFERENCES conversation_turns(id) ON DELETE CASCADE
         );

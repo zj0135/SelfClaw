@@ -16,6 +16,10 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     private readonly Dictionary<Guid, Task<ConversationTranscriptSnapshot>> _transcriptLoads = [];
     private readonly object _transcriptLoadGate = new();
     private readonly object _selectionGate = new();
+    // The trigger a conversation's last turn compacted at, kept so the usage meter still shows the mark between
+    // turns. It is memory only: a conversation that has not run since the app started simply shows none. Only
+    // interactive and continuation runs pass through the run coordinator, so no child run leaves an entry here.
+    private readonly Dictionary<Guid, int> _compactionTriggers = [];
     private readonly CancellationTokenSource _loadCancellation = new();
     private ConversationTranscriptSnapshot? _selectedTranscript;
     private Guid? _selectedConversationId;
@@ -40,6 +44,20 @@ internal sealed class ConversationSessionCoordinator : IDisposable
     internal bool IsSelectedContinuation => GetSelectedRun()?.Origin == DirectTurnOrigin.Continuation;
     internal string? SelectedActivityText => GetSelectedRun()?.RuntimeState?.ActivityText;
     internal TranscriptLiveUsage? SelectedLiveUsage => GetSelectedRun()?.RuntimeState?.LiveUsage;
+
+    internal int? SelectedCompactionTriggerTokens
+    {
+        get
+        {
+            lock (_selectionGate)
+            {
+                if (_selectedConversationId is not Guid id) return null;
+                if (_runs.GetActiveRun(id)?.RuntimeState?.CompactionTriggerTokens is int running) return running;
+                return _compactionTriggers.TryGetValue(id, out var remembered) ? remembered : null;
+            }
+        }
+    }
+
     internal event Action? SelectedStateChanged;
 
     internal ConversationTranscriptSnapshot CaptureSelectedTranscript()
@@ -88,6 +106,7 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         ForgetTranscriptLoad(conversationId);
         lock (_selectionGate)
         {
+            _compactionTriggers.Remove(conversationId);
             if (_selectedConversationId != conversationId) return;
             _selectionVersion++;
             _selectedTranscript = null;
@@ -124,6 +143,13 @@ internal sealed class ConversationSessionCoordinator : IDisposable
         if (change.IsCompleted) ForgetTranscriptLoad(handle.ConversationId);
         lock (_selectionGate)
         {
+            if (change.IsCompleted && state is not null)
+            {
+                // A turn that resolved no trigger (compaction off, a CLI turn) clears the mark instead of
+                // leaving an older turn's behind.
+                if (state.CompactionTriggerTokens is int trigger) _compactionTriggers[handle.ConversationId] = trigger;
+                else _compactionTriggers.Remove(handle.ConversationId);
+            }
             if (_selectedConversationId != handle.ConversationId || handle.Generation < _selectedRunGeneration) return;
             var active = _runs.GetActiveRun(handle.ConversationId);
             if (active is not null && active.Generation > handle.Generation) return;

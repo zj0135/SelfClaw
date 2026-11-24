@@ -25,8 +25,11 @@ internal static class DirectPromptAssembly
         IReadOnlyDictionary<Guid, IReadOnlyList<AIContent>>? attachments = null)
     {
         var build = DirectHistoryReplay.Compose(
-            DirectHistoryReplay.BuildUnits(messages, turns, toolExecutions, messageAdjustments, attachments),
-            DirectSystemPrompt.BuildSystemText(agentInstructions, systemInstructions, executionContext, compression),
+            DirectHistoryReplay.BuildUnits(messages, turns, toolExecutions, messageAdjustments, attachments, compression),
+            DirectSystemPrompt.ComposeSystemText(
+                DirectSystemPrompt.BuildFixedText(agentInstructions, systemInstructions, executionContext),
+                compression?.Summary,
+                planSection: null),
             DirectSystemPrompt.BuildTrailingProtectedMessages(executionContext),
             compression);
 
