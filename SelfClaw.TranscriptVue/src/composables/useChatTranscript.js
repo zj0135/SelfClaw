@@ -9,6 +9,13 @@ export function setPendingConversation(id) {
 	pendingConversationId.value = id ?? null;
 }
 
+// 宿主对「重新选中已经选中的会话」会直接短路：既不重载会话，也不推送转录快照，
+// 于是「等匹配推送解除 pending」这条路永远不会发生。发起方必须自己撤销自己置的标记，
+// 否则 isLoadingHistory 会一直为真、骨架永远在转。只撤销同一条 id，别掀掉更新的切换。
+export function clearPendingConversation(id) {
+	if (pendingConversationId.value === id) pendingConversationId.value = undefined;
+}
+
 export function useChatTranscript(scroll) {
 	const state = reactive({
 		items: [], selectedConversationId: null, isBusy: false, isContinuation: false,

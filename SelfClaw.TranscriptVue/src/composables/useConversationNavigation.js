@@ -3,7 +3,7 @@ import { useHostBridge, isSuperseded } from './hostBridge.js';
 import { useTranscriptBridge } from './transcriptBridge.js';
 import { useToast } from './useToast.js';
 import { useConfirm } from './useConfirm.js';
-import { setPendingConversation } from './useChatTranscript.js';
+import { clearPendingConversation, setPendingConversation } from './useChatTranscript.js';
 import { buildSidebarGroups } from '../renderers/sidebarGroups.js';
 
 // 「归档」是按时间推导出来的：挂机过夜、跨过第 7 天边界都得自己迁移，
@@ -18,6 +18,8 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 	const sidebarConversations = ref([]);
 	const selectedConversationId = ref(null);
 	const isSelectedBusy = ref(false);
+	// 最近一次还没回包的切换目标：双击同一条会话时靠它把第二次点击判成重复。
+	let switchingToId = null;
 	const now = ref(Date.now());
 	transcript.on((payload) => {
 		if (sidebarConversations.value !== payload.conversations) sidebarConversations.value = payload.conversations || [];
@@ -193,20 +195,33 @@ export function useConversationNavigation(currentViewId, chatViewRef) {
 	}
 
 	async function onSidebarSelect(id) {
-		try {
-			if (id === 'chat' || standaloneViewIds.has(id)) {
-				currentViewId.value = id;
-				return;
-			}
+		if (id === 'chat' || standaloneViewIds.has(id)) {
+			currentViewId.value = id;
+			return;
+		}
 
-			if (sidebarConversations.value.some((conversation) => conversation.id === id)) {
-				setPendingConversation(id);
-				currentViewId.value = 'chat';
-				await request('select-conversation', { conversationId: id });
-			}
+		if (!sidebarConversations.value.some((conversation) => conversation.id === id)) return;
+
+		currentViewId.value = 'chat';
+		// 重复点击同一个会话：宿主按 id 相等直接短路（不重载会话、不推转录快照），
+		// 这里再置 pending 就再没有回包能解除它，骨架会一直转下去。目标既可能是正在显示的
+		// 会话，也可能是上一次还没回包的切换；两种情况都只做「回到聊天页」。
+		if (id === (switchingToId ?? selectedConversationId.value)) {
+			clearPendingConversation(id);
+			return;
+		}
+
+		setPendingConversation(id);
+		switchingToId = id;
+		try {
+			await request('select-conversation', { conversationId: id });
 		} catch (failure) {
-			setPendingConversation(undefined);
 			if (!isSuperseded(failure)) showToast(failure?.message || String(failure));
+		} finally {
+			// pending 只是「等匹配推送」的临时标记，不是加载真相：请求一结束就撤掉自己置的那份，
+			// 真正的空列表由 isLoadingHistory 的兜底分支接管。靠推送解除会漏掉宿主短路的情况。
+			if (switchingToId === id) switchingToId = null;
+			clearPendingConversation(id);
 		}
 	}
 	return { navItems, sidebarActiveId, activeConversationTitle, onSidebarAction, onSidebarSelect };
