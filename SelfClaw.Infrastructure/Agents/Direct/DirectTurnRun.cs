@@ -268,6 +268,7 @@ internal sealed class DirectTurnRun
             .ConfigureAwait(false);
         _context.AppendInputs(consumed.Messages, attachmentContents);
         _output.BeginInputSegment();
+        _progressGuard.Reset();
     }
 
     /// <summary>
@@ -293,7 +294,7 @@ internal sealed class DirectTurnRun
         var total = (long)counted.TotalWithReserve;
         foreach (var input in batch.Inputs)
         {
-            if (_meter.CountInputText(input.Prompt, profile) is not int promptTokens)
+            if (_meter.CountInput(input, profile) is not int promptTokens)
             {
                 return true;
             }
@@ -331,9 +332,9 @@ internal sealed class DirectTurnRun
             throw new InvalidDataException($"The provider returned an unsupported finish reason: '{reason}'.");
         }
 
-        if (response.FinishReason is null && !contents.Any(HasResponseContent))
+        if (response.FinishReason is null)
         {
-            throw new InvalidDataException("The provider returned no response content or completion information.");
+            throw new InvalidDataException("The provider stream ended without a completion reason; the response may be incomplete.");
         }
 
         return null;
@@ -344,16 +345,6 @@ internal sealed class DirectTurnRun
 
     private static bool IsEmptyRefusal(ErrorContent error) =>
         error.ErrorCode == "Refusal" && string.IsNullOrWhiteSpace(error.Message);
-
-    private static bool HasResponseContent(AIContent content) => content switch
-    {
-        TextContent text => !string.IsNullOrWhiteSpace(text.Text),
-        TextReasoningContent reasoning => !string.IsNullOrWhiteSpace(reasoning.Text) || !string.IsNullOrEmpty(reasoning.ProtectedData),
-        UsageContent or ErrorContent => false,
-        DataContent data => !data.Data.IsEmpty,
-        UriContent or ToolCallContent or ToolResultContent => true,
-        _ => content.RawRepresentation is not null
-    };
 
     // Every stop that leaves calls unexecuted publishes the same shape: one Canceled result per call, with the
     // reason as its summary and the human sentence as its detail.
@@ -374,37 +365,54 @@ internal sealed class DirectTurnRun
         // Images the protocol can only deliver as a user message are collected for the whole batch: one user
         // message after every tool message, so no user turn can ever sit between two tool results.
         var followUpImages = new List<DataContent>();
+        var questionReturned = false;
         for (var index = 0; index < calls.Length; index++)
         {
             var call = calls[index];
-            DirectToolResult direct;
-            try
-            {
-                direct = await _setup.Invoker.InvokeAsync(call, cancellationToken).ConfigureAwait(false);
-            }
-            // Only the turn's own token is a cancellation. One raised by anything else (a checkpoint, a
-            // torn-down input session) is a failure and has to leave the same terminal events behind.
-            catch (Exception exception) when (
-                exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
-            {
-                _output.PublishToolFault(call.CallId, exception);
-                // The remaining calls of the batch never ran, but their started events are already published:
-                // each one needs a terminal event that says why.
-                CancelCalls(calls[(index + 1)..], DirectLoopMessages.BatchAbortedReason,
-                    DirectLoopMessages.BatchAbortedCall);
-                throw;
-            }
+            var direct = questionReturned
+                ? new DirectToolResult(ToolCallStatus.Canceled, DirectLoopMessages.UserQuestionBoundaryReason,
+                    JsonSerializer.SerializeToElement(new { reason = DirectLoopMessages.UserQuestionBoundaryReason,
+                        message = DirectLoopMessages.UserQuestionBoundaryCanceledCall }),
+                    DirectLoopMessages.UserQuestionBoundaryCanceledCall)
+                : await ExecuteToolAsync(calls, index, cancellationToken).ConfigureAwait(false);
 
             // Exactly one completion event per call, published from the invoker's own result type.
             results.Add(new FunctionResultContent(
                 call.CallId, ToolResultImagePayload.Create(direct, _setup.ImageDelivery, followUpImages)));
             _output.PublishToolResult(call.CallId, direct);
+            // Even an invalid questionnaire needs a new model decision before any preplanned work can run.
+            if (!string.IsNullOrWhiteSpace(call.Name) &&
+                _setup.CapabilityLease.Bindings.TryGetValue(call.Name, out var binding) &&
+                binding.Descriptor.Kind == ToolCallKind.Ask)
+            {
+                questionReturned = true;
+                if (direct.Status == ToolCallStatus.Completed) _progressGuard.Reset();
+            }
         }
 
         IReadOnlyList<ChatMessage> followUps = followUpImages.Count > 0
             ? [ToolResultImagePayload.CreateFollowUp(followUpImages)]
             : [];
         return (results, followUps);
+    }
+
+    private async Task<DirectToolResult> ExecuteToolAsync(
+        FunctionCallContent[] calls, int index, CancellationToken cancellationToken)
+    {
+        var call = calls[index];
+        try
+        {
+            return await _setup.Invoker.InvokeAsync(call, cancellationToken).ConfigureAwait(false);
+        }
+        // A checkpoint or input-session failure must close the batch; only the turn's token cancels it.
+        catch (Exception exception) when (
+            exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            _output.PublishToolFault(call.CallId, exception);
+            CancelCalls(calls[(index + 1)..], DirectLoopMessages.BatchAbortedReason,
+                DirectLoopMessages.BatchAbortedCall);
+            throw;
+        }
     }
 
     private async Task<ChatResponse> ReadResponseAsync(CancellationToken cancellationToken)

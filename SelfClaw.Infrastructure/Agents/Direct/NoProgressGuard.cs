@@ -8,8 +8,8 @@ namespace SelfClaw.Infrastructure.Agents.Direct;
 /// <summary>
 /// Detects a turn that keeps calling the same tools with the same arguments and getting the same results.
 /// A request-count cap cannot tell a long task from a stuck one; this can, because a loop only shows
-/// progress by producing something new. Consecutive identical batches are the signal, so an agent that
-/// polls a build sees a different result each time and never trips it.
+/// progress by producing something new. Consecutive identical batches are the signal; a new user input
+/// starts a fresh observation period, even if the user asks for the same operation again.
 /// </summary>
 internal sealed class NoProgressGuard
 {
@@ -41,6 +41,13 @@ internal sealed class NoProgressGuard
         }
 
         return _repeatedBatches >= RepeatedBatchLimit;
+    }
+
+    internal void Reset()
+    {
+        _previousFingerprint = null;
+        _repeatedBatches = 0;
+        _fingerprint.Clear();
     }
 
     // Call arguments and results decide progress; the call id is random per response and must not enter the

@@ -12,6 +12,11 @@ internal static class DirectLoopMessages
     internal const string ContentFilterReason = "ProviderContentFilter";
     internal const string OutputTruncatedReason = "OutputTruncated";
     internal const string ProviderErrorReason = "ProviderError";
+    internal const string UserQuestionBoundaryReason = "UserQuestionBoundary";
+
+    internal const string UserQuestionBoundaryCanceledCall =
+        "This call was prepared before ask_user returned and was not executed. " +
+        "Read the question result and decide which tools to call next.";
 
     internal const string ContentFilterCanceledCall =
         "The provider filtered or refused this response; the tool was not executed.";

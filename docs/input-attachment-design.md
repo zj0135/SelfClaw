@@ -107,6 +107,7 @@
 
 ## 7. 模型调用
 
+- steer 消费提交前，`DirectPromptMeter.CountInput` 将正文、消息开销及每个 `AttachmentReference` 的图片开销一起计入窗口预算。图像按现有计数器的固定开销计数，此时不读盘；文件在消费时失效会减少实际载荷，不会增加预算。超窗批次保持 Held，不能先写成 Consumed 再交给 provider 拒绝。模型已最终回答后的迟到批次同样检查完整预算，超窗只 hold 输入，保留已成功的回答。
 - `AttachmentContentReader` 只为带 `MessageAttachmentKind.Image` 附件的用户消息预读字节；路径经 `TryResolveStoredFile`、媒体类型白名单与体积校验；文件缺失 / 越界 / 超限 / IO 失败 → 跳过该附件并 warning，`OperationCanceledException` 重抛。产物 `DataContent(bytes, mediaType) { Name = fileName }`，随回合上下文存活，不跨回合缓存。回合开始只把**本次请求还会重放**的消息交给它（`DirectHistoryReplay.SelectReplayedMessages`：可重放、且在现有压缩边界之后）：已被摘要覆盖的含图消息不再重放，也就不再读盘。
 - `DirectHistoryReplay.BuildUnitsCore`：有附件时用户 unit 内容是**先图片后文本**；只有图片没有文字也照常产出 unit（当前入口仍要求文字，这是防御分支）。`DirectConversationContext.AppendInputs` 对 steer 用同一形状，steer 仍是受保护 entry。
 - `DirectTokenCounter`：`DataContent` 计 `PerImageTokens = 1600`（不低于 Claude 标准档单图上限 1,568：低估会推迟压缩，高估只是略早压缩）；计数缓存键包含图片数量，避免同一 `MessageId` 的纯文本与含图计数互相污染。高分辨率档的大图实际可达 4,784，本地计数无法感知，由回合开始触发的 provider 实测下限兜底（`direct-context-compaction-design.md` §5.4）。

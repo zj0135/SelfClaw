@@ -26,10 +26,13 @@ FunctionCallContent(ask_user { questions: [...] })
   → AgentActivityCoordinator 快照（AwaitingAnswer）
   → UserQuestionPresenter.push "user-question/state"     前端 dock
   → "resolve-user-question"                              宿主校验并 TryAnswer
-  → DirectToolResult(Completed, Detail)                  → ToolCallCompletedEvent → 模型继续
+  → DirectToolResult(Completed, Detail)                  → ToolCallCompletedEvent
+  → 同批剩余调用补 Canceled + 对应 tool result             → 模型读取答案后重新决策
 ```
 
-关键结构性决定：**`DirectToolInvoker`、`DirectTurnRun`、`ConversationTurnRecorder`、`DirectHistoryReplay` 零改动**。提问就是一个"会阻塞很久"的普通内置工具，因此审批/执行 checkpoint/连续故障预算/转录落库/历史回放全部自动复用。
+`DirectToolInvoker` 仍负责审批、执行 checkpoint 与工具故障预算，录制器与历史回放继续使用通用工具事件。`DirectTurnRun` 把绑定为 `ToolCallKind.Ask` 的调用作为批次执行边界：调用返回后，同批剩余调用一律不执行、不请求审批、不写执行 checkpoint，而是补齐 `Canceled`（`UserQuestionBoundary`）及对应的模型可见 tool result，再进入下一次模型请求。提问之前已执行的工具保留真实结果。
+
+用户作答、跳过、问卷参数非法和配额耗尽都需要模型先读到提问结果，才能重新决定后续操作；不能继续执行尚未看到答案时预生成的调用。用户停止则沿回合取消路径结束。成功返回的问答同时重置无进展检测，因为用户的答复构成新的输入。
 
 ## 3. 契约（Core）
 
@@ -48,6 +51,8 @@ bool TryAnswer(Guid requestId, UserQuestionAnswer answer);   // 原子取走；�
 - `UserQuestionPromptAnswer(Guid PromptId, IReadOnlyList<string> SelectedLabels, string? OtherText, bool Skipped)`
 - `UserQuestionAnswer(Guid RequestId, IReadOnlyList<UserQuestionPromptAnswer> Answers, bool Skipped)`
 - `AskUserRules` —— 唯一规则源，见 §4。
+
+生产绑定通过 `AskUserToolset.CreateTools(handler, conversationId, turnId)` 捕获当前会话与回合 ID，每次请求必须携带它们。活动协调器据此关联会话标题；问题批次 ID 仍为独立的新 ID，不能拿会话或回合 ID 替代。
 
 ## 4. `AskUserRules`：限额与校验的唯一来源
 

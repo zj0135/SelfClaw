@@ -209,11 +209,11 @@ public sealed class DirectToolInvokerTests
     {
         var approvals = new RecordingApprovalHandler(approved: true);
         var questions = new BlockingQuestionHandler();
-        var binding = new AskUserToolset().CreateTools(questions).Single();
         var request = CreateRequest(ToolPermissionMode.FullAccess, approvals, checkpoint: null) with
         {
             UserQuestionHandler = questions
         };
+        var binding = new AskUserToolset().CreateTools(questions, request.ConversationId, request.TurnId).Single();
         var invoker = new DirectToolInvoker(
             request,
             new Dictionary<string, DirectToolBinding>(StringComparer.Ordinal) { [binding.Tool.Name] = binding });
@@ -236,6 +236,8 @@ public sealed class DirectToolInvokerTests
             CancellationToken.None).AsTask();
 
         var asked = await questions.Asked;
+        asked.ConversationId.Should().Be(request.ConversationId);
+        asked.TurnId.Should().Be(request.TurnId);
         invocation.IsCompleted.Should().BeFalse();
         approvals.Requests.Should().BeEmpty();
 

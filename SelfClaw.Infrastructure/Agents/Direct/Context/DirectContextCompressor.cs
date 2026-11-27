@@ -153,6 +153,15 @@ internal sealed class DirectContextCompressor
             .StreamAsync(summarizer.Client, messages, options, ProviderStreamIdleGuard.DefaultIdleTimeout, cancellationToken)
             .ToChatResponseAsync(cancellationToken)
             .ConfigureAwait(false);
+        // A partial answer must never replace the source history, including when an error arrives after text.
+        if (response.FinishReason != ChatFinishReason.Stop ||
+            response.Messages.SelectMany(message => message.Contents).Any(content => content is ToolCallContent ||
+                content is ErrorContent error &&
+                !(error.ErrorCode == "Refusal" && string.IsNullOrWhiteSpace(error.Message))))
+        {
+            throw new InvalidDataException("The context summary did not complete successfully; the original history was retained.");
+        }
+
         var summary = response.Text?.Trim();
         return string.IsNullOrWhiteSpace(summary) ? null : summary;
     }

@@ -30,7 +30,7 @@ internal sealed class AskUserToolset
         + "must stay false. The call blocks until the user answers, so ask everything you need to decide in one "
         + "call instead of asking again. Write the questions in the user's language.";
 
-    public IReadOnlyList<DirectToolBinding> CreateTools(IUserQuestionHandler handler)
+    public IReadOnlyList<DirectToolBinding> CreateTools(IUserQuestionHandler handler, Guid conversationId, Guid turnId)
     {
         ArgumentNullException.ThrowIfNull(handler);
         var askedQuestions = 0;
@@ -59,7 +59,7 @@ internal sealed class AskUserToolset
             }
 
             askedQuestions += prompts.Count;
-            var request = new UserQuestionRequest(Guid.NewGuid(), prompts);
+            var request = new UserQuestionRequest(Guid.NewGuid(), prompts, conversationId, turnId);
             var answer = await handler.RequestAnswerAsync(request, cancellationToken).ConfigureAwait(false);
             return Describe(prompts, answer);
         }

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.AI;
+using SelfClaw.Core.Models;
 using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Context.Models;
 using SelfClaw.Infrastructure.AiProviders.Models;
@@ -130,6 +131,18 @@ internal sealed class DirectPromptMeter
     /// The size of one pending input, counted before it joins the context so a steer batch is admitted or held
     /// without being appended first. Null means counting is unavailable.
     /// </summary>
-    internal int? CountInputText(string? prompt, AiModelProfile profile)
-        => _tokenCounter.CountText(prompt, profile);
+    internal int? CountInput(ConversationInputItem input, AiModelProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        var contents = new List<AIContent>();
+        // Images are charged by count, not bytes. Reserve every accepted reference before consumption;
+        // a missing file may reduce the sent prompt, but loading it later cannot make it exceed this budget.
+        foreach (var attachment in input.Attachments ?? [])
+        {
+            contents.Add(new DataContent(ReadOnlyMemory<byte>.Empty, attachment.MediaType));
+        }
+
+        contents.Add(new TextContent(input.Prompt));
+        return _tokenCounter.CountMessages([new ChatMessage(ChatRole.User, contents)], profile);
+    }
 }

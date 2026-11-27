@@ -15,7 +15,7 @@ public sealed class AskUserToolsetTests
     [Fact]
     public void CreateTools_exposes_one_unapproved_ask_tool()
     {
-        var binding = new AskUserToolset().CreateTools(new ScriptedQuestionHandler(Skip))
+        var binding = new AskUserToolset().CreateTools(new ScriptedQuestionHandler(Skip), Guid.NewGuid(), Guid.NewGuid())
             .Should().ContainSingle().Subject;
 
         binding.Tool.Name.Should().Be(AskUserRules.ToolName);
@@ -34,7 +34,7 @@ public sealed class AskUserToolsetTests
     {
         // The stored arguments_json is what the transcript card parses, so the batch must not sit behind a
         // wrapper property.
-        var schema = new AskUserToolset().CreateTools(new ScriptedQuestionHandler(Skip)).Single().Tool.JsonSchema;
+        var schema = new AskUserToolset().CreateTools(new ScriptedQuestionHandler(Skip), Guid.NewGuid(), Guid.NewGuid()).Single().Tool.JsonSchema;
 
         var questions = schema.GetProperty("properties").GetProperty("questions");
         questions.GetProperty("type")[0].GetString().Should().Be("array");
@@ -161,7 +161,7 @@ public sealed class AskUserToolsetTests
     {
         var request = (DirectChatTurnRequest)DirectAgentChatRuntimeTests.CreateRequest(Guid.NewGuid());
         var bindings = DirectTurnCapabilityResolver
-            .BindTools(request, new AskUserToolset().CreateTools(handler))
+            .BindTools(request, new AskUserToolset().CreateTools(handler, request.ConversationId, request.TurnId))
             .ToDictionary(binding => binding.Tool.Name, StringComparer.Ordinal);
         var invoker = new DirectToolInvoker(request, bindings);
         return async arguments =>

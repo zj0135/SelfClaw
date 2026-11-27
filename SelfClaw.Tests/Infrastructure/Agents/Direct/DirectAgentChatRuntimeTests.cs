@@ -87,7 +87,8 @@ public sealed class DirectAgentChatRuntimeTests
                 new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 })),
             Update("message-1",
                 new TextContent("world"),
-                new UsageContent(new UsageDetails { InputTokenCount = 13, OutputTokenCount = 6 }))
+                new UsageContent(new UsageDetails { InputTokenCount = 13, OutputTokenCount = 6 })),
+            FinishUpdate("message-1", ChatFinishReason.Stop)
         ]);
         var factory = new FakeChatClientFactory(client);
         var runtime = CreateRuntime(factory);
@@ -248,12 +249,14 @@ public sealed class DirectAgentChatRuntimeTests
                 Update("message-1",
                     new TextContent("checking"),
                     new FunctionCallContent("call-1", "read_file", new Dictionary<string, object?>()),
-                    new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 }))
+                    new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 })),
+                FinishUpdate("message-1", ChatFinishReason.ToolCalls)
             ],
             [
                 Update("message-2",
                     new TextContent("done"),
-                    new UsageContent(new UsageDetails { InputTokenCount = 20, OutputTokenCount = 4 }))
+                    new UsageContent(new UsageDetails { InputTokenCount = 20, OutputTokenCount = 4 })),
+                FinishUpdate("message-2", ChatFinishReason.Stop)
             ]
         ]);
         var factory = new FakeChatClientFactory(client);

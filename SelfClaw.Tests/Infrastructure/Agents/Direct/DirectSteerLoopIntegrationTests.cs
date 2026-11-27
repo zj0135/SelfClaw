@@ -12,6 +12,7 @@ using SelfClaw.Infrastructure.Agents.Direct.Abstractions;
 using SelfClaw.Infrastructure.Agents.Direct.Capabilities;
 using SelfClaw.Infrastructure.Agents.Direct.Tools;
 using SelfClaw.Infrastructure.Agents.Direct.Tools.Models;
+using SelfClaw.Infrastructure.Attachments;
 using SelfClaw.Tests.TestDoubles;
 
 namespace SelfClaw.Tests.Infrastructure.Agents.Direct;
@@ -170,6 +171,66 @@ public sealed class DirectSteerLoopIntegrationTests
         (await context.ScalarAsync("SELECT reason_code FROM conversation_inputs;"))
             .Should().Be(ConversationInputReason.ContextBudgetExceeded);
         (await context.Turns.ListTurnsAsync(context.Conversation.Id)).Single().Status.Should().Be(ConversationTurnStatus.Failed);
+    }
+
+    [Theory]
+    [InlineData(false, 5000, false)]
+    [InlineData(true, 5000, false)]
+    [InlineData(false, 7000, true)]
+    [InlineData(true, 7000, true)]
+    public async Task Steer_images_are_budgeted_before_consumption_including_after_a_final_answer(bool late, int window, bool fits)
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var provider = new SteerProvider { ToolNames = [], GateFirstStream = late };
+        var runtime = CreateRuntime(context, provider, out var request, contextWindowTokens: window);
+        if (!late) await context.SeedPendingSteerWithAttachmentAsync("inspect image");
+        var recording = RecordAsync(runtime, request, context);
+        if (late)
+        {
+            await provider.FirstStreamStarted.Task.WaitAsync(Timeout);
+            await context.SeedPendingSteerWithAttachmentAsync("inspect image");
+            provider.ReleaseFirstStream.TrySetResult();
+        }
+
+        var result = await recording.WaitAsync(Timeout);
+
+        result.Boundaries.Should().Be(fits ? 1 : 0);
+        result.Terminal.Should().NotBeNull();
+        result.Terminal.Status.Should().Be(fits || late ? RunCompletionStatus.Succeeded : RunCompletionStatus.Failed);
+        provider.Requests.Should().HaveCount((late ? 1 : 0) + (fits ? 1 : 0));
+        (await context.ScalarAsync("SELECT status FROM conversation_inputs;")).Should().Be(fits ? 2L : 3L);
+        (await context.ScalarAsync("SELECT COUNT(*) FROM message_attachments;")).Should().Be(fits ? 1L : 0L);
+        if (fits)
+            provider.Requests[^1].SelectMany(message => message.Contents).OfType<DataContent>().Should().ContainSingle();
+        else
+            (await context.ScalarAsync("SELECT reason_code FROM conversation_inputs;")).Should().Be(ConversationInputReason.ContextBudgetExceeded);
+    }
+
+    [Fact]
+    public async Task Consumed_user_inputs_restart_no_progress_detection_for_repeated_tools()
+    {
+        using var context = new ConversationTurnTestContext();
+        await context.StartAsync();
+        var executions = 0;
+        const int rounds = 7;
+        var provider = new SteerProvider { Endless = true, ToolRoundLimit = rounds };
+        var runtime = CreateRuntime(context, provider, out var request, _ => async () =>
+        {
+            executions++;
+            // Acceptance while a tool is executing cannot revoke its permit; the next request consumes it.
+            if (executions < rounds) await context.SeedPendingSteerAsync($"Inspect again {executions}");
+            return Result("unchanged");
+        });
+
+        var result = await RecordAsync(runtime, request, context).WaitAsync(Timeout);
+
+        executions.Should().Be(rounds);
+        result.Boundaries.Should().Be(rounds - 1);
+        result.Terminal.Should().NotBeNull();
+        result.Terminal.Status.Should().Be(RunCompletionStatus.Succeeded);
+        provider.Requests.Should().HaveCount(rounds + 1);
+        (await context.ScalarAsync("SELECT COUNT(*) FROM conversation_inputs WHERE status = 2;")).Should().Be((long)rounds - 1);
     }
 
     /// <summary>
@@ -365,7 +426,8 @@ public sealed class DirectSteerLoopIntegrationTests
             context.State.Messages, context.State.Turns, factory.Profile.Id, ToolPermissionMode.RequireApproval, null,
             new DirectTurnExecutionContext(DirectTurnOrigin.Interactive, null, null), InputSession: session,
             Steering: steering ?? context.InputSession);
-        return DirectAgentChatRuntimeTests.CreateRuntime(factory, new FixedResolver(lease));
+        return DirectAgentChatRuntimeTests.CreateRuntime(factory, new FixedResolver(lease),
+            attachmentContentReader: new AttachmentContentReader(context.Database.Paths));
     }
 
     private static async Task<RecordingResult> RecordAsync(DirectAgentChatRuntime runtime, DirectChatTurnRequest request,
@@ -461,6 +523,7 @@ public sealed class DirectSteerLoopIntegrationTests
         internal IReadOnlyList<string> ToolNames { get; init; } = ["p"];
         internal bool GateFirstStream { get; init; }
         internal bool Endless { get; init; }
+        internal int? ToolRoundLimit { get; init; }
         internal TaskCompletionSource FirstStreamStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal TaskCompletionSource ReleaseFirstStream { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -497,7 +560,7 @@ public sealed class DirectSteerLoopIntegrationTests
                     { FinishReason = ChatFinishReason.Stop };
                 }
             }
-            else if (Endless)
+            else if (Endless && (ToolRoundLimit is null || request <= ToolRoundLimit))
             {
                 yield return new ChatResponseUpdate(ChatRole.Assistant,
                     [new FunctionCallContent($"call-{request}", ToolNames[0], new Dictionary<string, object?>())])

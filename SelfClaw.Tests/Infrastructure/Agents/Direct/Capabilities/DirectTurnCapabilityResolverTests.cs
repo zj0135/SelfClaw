@@ -686,9 +686,10 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
     {
         var resolver = CreateResolver(new PackageRepository([]));
         var needsCeiling = origin is DirectTurnOrigin.Continuation or DirectTurnOrigin.Subagent;
+        var questions = new StubQuestionHandler();
         var request = CreateRequest([], "ask me first") with
         {
-            UserQuestionHandler = new StubQuestionHandler(),
+            UserQuestionHandler = questions,
             ExecutionContext = new DirectTurnExecutionContext(
                 origin,
                 needsCeiling ? new DirectCapabilityCeiling(AgentRuntimeDefinition.SystemToolPolicy, [], [], [], []) : null,
@@ -701,6 +702,16 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
         if (expected)
         {
             toolNames.Should().Contain(AskUserRules.ToolName);
+            await lease.Bindings[AskUserRules.ToolName].Tool.InvokeAsync(new AIFunctionArguments
+            {
+                ["questions"] = JsonSerializer.SerializeToElement(new[]
+                {
+                    new { question = "Which language?", options = new[] { new { label = "C#" }, new { label = "Python" } } }
+                })
+            });
+            var asked = questions.Requests.Should().ContainSingle().Subject;
+            asked.ConversationId.Should().Be(request.ConversationId);
+            asked.TurnId.Should().Be(request.TurnId);
         }
         else
         {
@@ -1238,10 +1249,15 @@ public sealed class DirectTurnCapabilityResolverTests : IDisposable
 
     private sealed class StubQuestionHandler : IUserQuestionHandler
     {
+        internal List<UserQuestionRequest> Requests { get; } = [];
+
         public Task<UserQuestionAnswer> RequestAnswerAsync(
             UserQuestionRequest request,
             CancellationToken cancellationToken = default)
-            => Task.FromResult(new UserQuestionAnswer(request.RequestId, [], Skipped: true));
+        {
+            Requests.Add(request);
+            return Task.FromResult(new UserQuestionAnswer(request.RequestId, [], Skipped: true));
+        }
 
         public bool TryAnswer(Guid requestId, UserQuestionAnswer answer) => false;
     }

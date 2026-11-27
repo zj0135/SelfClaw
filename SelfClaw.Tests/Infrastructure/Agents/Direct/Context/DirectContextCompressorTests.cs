@@ -202,6 +202,55 @@ public sealed class DirectContextCompressorTests
         logger.Messages.Should().ContainSingle().Which.Should().Contain(ConversationId.ToString()).And.Contain(TurnId.ToString());
     }
 
+    [Theory]
+    [InlineData("length")]
+    [InlineData("content_filter")]
+    [InlineData("tool_calls")]
+    [InlineData("unknown")]
+    [InlineData("missing")]
+    [InlineData("error")]
+    [InlineData("refusal")]
+    [InlineData("call")]
+    public async Task Rejects_partial_or_failed_summaries_even_when_text_was_produced(string scenario)
+    {
+        var contents = new List<AIContent> { new TextContent("partial summary") };
+        if (scenario == "error") contents.Add(new ErrorContent("failed"));
+        if (scenario == "refusal") contents.Add(new ErrorContent("refused") { ErrorCode = "Refusal" });
+        if (scenario == "call") contents.Add(new FunctionCallContent("call", "read_file", new Dictionary<string, object?>()));
+        var finish = scenario switch
+        {
+            "missing" => (ChatFinishReason?)null,
+            "error" or "refusal" or "call" => ChatFinishReason.Stop,
+            _ => new ChatFinishReason(scenario)
+        };
+        var client = new RecordingChatClient
+        {
+            Updates = [new ChatResponseUpdate(ChatRole.Assistant, contents) { FinishReason = finish }]
+        };
+
+        var outcome = await CreateCompressor(client).TryCompressAsync(Request(
+            [Unit(new ChatMessage(ChatRole.User, "must retain the original instructions"))],
+            turnLease: CreateLease(client, "turn-model"), previousSummary: "previous valid summary"));
+
+        outcome.Should().BeNull("only a complete, successful summary may replace history");
+    }
+
+    [Fact]
+    public async Task An_empty_refusal_marker_does_not_reject_a_completed_summary()
+    {
+        var client = new RecordingChatClient
+        {
+            Updates = [new ChatResponseUpdate(ChatRole.Assistant,
+                [new TextContent("valid summary"), new ErrorContent("") { ErrorCode = "Refusal" }])
+                { FinishReason = ChatFinishReason.Stop }]
+        };
+        var outcome = await CreateCompressor(client).TryCompressAsync(Request(
+            [Unit(new ChatMessage(ChatRole.User, "instructions"))], turnLease: CreateLease(client, "turn-model")));
+
+        outcome.Should().NotBeNull();
+        outcome.Summary.Should().Be("valid summary");
+    }
+
     [Fact]
     public async Task Returns_null_and_warns_when_the_provider_fails()
     {
@@ -306,10 +355,10 @@ public sealed class DirectContextCompressorTests
     public async Task Aggregates_several_text_updates_into_the_same_summary_as_one()
     {
         const string text = "early history summarized";
-        var singleClient = new RecordingChatClient { Updates = [TextUpdate(text)] };
+        var singleClient = new RecordingChatClient { Updates = [TextUpdate(text), new() { FinishReason = ChatFinishReason.Stop }] };
         var splitClient = new RecordingChatClient
         {
-            Updates = [TextUpdate("early "), TextUpdate("history "), TextUpdate("summarized")]
+            Updates = [TextUpdate("early "), TextUpdate("history "), TextUpdate("summarized"), new() { FinishReason = ChatFinishReason.Stop }]
         };
         var units = new[] { Unit(new ChatMessage(ChatRole.User, "hello")) };
 
@@ -552,6 +601,7 @@ public sealed class DirectContextCompressorTests
             {
                 yield return new ChatResponseUpdate(message.Role, message.Contents);
             }
+            yield return new ChatResponseUpdate { FinishReason = response.FinishReason ?? ChatFinishReason.Stop };
         }
 
         public object? GetService(Type serviceType, object? serviceKey = null) => null;

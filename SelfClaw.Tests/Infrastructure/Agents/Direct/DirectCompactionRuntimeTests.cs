@@ -152,6 +152,32 @@ public sealed class DirectCompactionRuntimeTests
             .Should().Be(RunCompletionStatus.Succeeded);
     }
 
+    [Theory]
+    [InlineData("length")]
+    [InlineData("content_filter")]
+    [InlineData(null)]
+    public async Task An_incomplete_summary_never_advances_the_boundary_or_replaces_the_original_messages(string? reason)
+    {
+        var client = new TurnClient([[Finish("m1", ChatFinishReason.Stop, new TextContent("done"))]])
+        {
+            SummaryText = "incomplete summary",
+            SummaryFinishReason = reason is null ? null : new ChatFinishReason(reason)
+        };
+        var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client);
+        var runtime = DirectAgentChatRuntimeTests.CreateRuntime(factory,
+            compressionPolicy: new FixedPolicySource(TriggeringPolicy()));
+
+        var events = await CollectAsync(runtime.StreamTurnAsync(CreateRequest(factory)));
+
+        events.OfType<ContextCompactionFailedEvent>().Should().ContainSingle();
+        events.OfType<ContextCompactionCompletedEvent>().Should().BeEmpty();
+        events.OfType<InTurnContextCompactionCompletedEvent>().Should().BeEmpty();
+        client.Invocations.Should().ContainSingle().Which.Select(message => message.Text)
+            .Should().Contain(["prior prompt", "prior answer", "user prompt"]);
+        client.Invocations[0].Should().NotContain(message => (message.Text ?? "").Contains("incomplete summary"));
+        events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
+    }
+
     [Fact]
     public async Task Disabled_compaction_over_the_window_fails_readably()
     {
@@ -484,6 +510,8 @@ public sealed class DirectCompactionRuntimeTests
         /// <summary>Null makes the summarization call fail the way an unsupported client would.</summary>
         internal string? SummaryText { get; init; }
 
+        internal ChatFinishReason? SummaryFinishReason { get; init; } = ChatFinishReason.Stop;
+
         internal Exception? ResponseException { get; init; }
 
         /// <summary>Lets a test cancel the turn's own token at the moment the summary call fails.</summary>
@@ -518,7 +546,8 @@ public sealed class DirectCompactionRuntimeTests
                     throw new NotSupportedException();
                 }
 
-                yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent(SummaryText)]);
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent(SummaryText)])
+                    { FinishReason = SummaryFinishReason };
                 yield break;
             }
 

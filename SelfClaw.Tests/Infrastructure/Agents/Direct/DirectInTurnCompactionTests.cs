@@ -456,7 +456,7 @@ public sealed class DirectInTurnCompactionTests
     [Fact]
     public async Task Compaction_runs_before_steer_intake_so_a_batch_that_did_not_fit_is_accepted()
     {
-        var steer = new string('s', 70);
+        var steer = new string('s', 70 - CountingTokenCounter.MessageCost);
         var client = new ScriptedClient(ToolRoundsThenFinal(rounds: 2, answerLength: 300));
         var factory = new DirectAgentChatRuntimeTests.FakeChatClientFactory(client, contextWindowTokens: 700)
         {
@@ -1034,7 +1034,8 @@ public sealed class DirectInTurnCompactionTests
                     throw new NotSupportedException();
                 }
 
-                yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent(SummaryText)]);
+                yield return new ChatResponseUpdate(ChatRole.Assistant, [new TextContent(SummaryText)])
+                    { FinishReason = ChatFinishReason.Stop };
                 yield break;
             }
 

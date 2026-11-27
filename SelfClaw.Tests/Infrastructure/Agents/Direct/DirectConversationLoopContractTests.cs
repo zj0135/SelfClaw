@@ -39,6 +39,7 @@ public sealed class DirectConversationLoopContractTests
     [InlineData("refusal")]
     [InlineData("unknown-finish")]
     [InlineData("error")]
+    [InlineData("missing-finish")]
     public async Task Abnormal_response_never_executes_tools_or_requests_a_followup(string scenario)
     {
         var executions = 0;
@@ -48,6 +49,7 @@ public sealed class DirectConversationLoopContractTests
                 {
                     "filter" => ChatFinishReason.ContentFilter,
                     "unknown-finish" => new ChatFinishReason("provider_error"),
+                    "missing-finish" => null,
                     _ => ChatFinishReason.Stop
                 }, new TextContent("partial"), new UsageContent(new UsageDetails { InputTokenCount = 10, OutputTokenCount = 2 })),
                 Update(n, null, Call("a"), Call("b")),
@@ -121,7 +123,7 @@ public sealed class DirectConversationLoopContractTests
         var events = await CollectAsync(runtime, request);
         var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
         terminal.Status.Should().Be(RunCompletionStatus.Failed);
-        terminal.ErrorMessage.Should().Contain("no response content or completion");
+        terminal.ErrorMessage.Should().Contain("without a completion reason");
         provider.Requests.Should().Be(afterTool ? 2 : 1);
         if (scenario == "usage") events.OfType<UsageReportedEvent>().Should().ContainSingle().Which.Usage.InputTokens.Should().Be(7);
         else events.OfType<UsageReportedEvent>().Should().BeEmpty();
@@ -130,24 +132,41 @@ public sealed class DirectConversationLoopContractTests
     [Theory]
     [InlineData("stop")]
     [InlineData("usage-stop")]
-    [InlineData("text")]
-    [InlineData("reasoning")]
-    [InlineData("protected-reasoning")]
-    [InlineData("image")]
-    public async Task Explicit_completion_or_supported_response_content_can_succeed_without_body_text(string scenario)
+    public async Task Explicit_completion_can_succeed_without_body_text(string scenario)
     {
         var provider = new Provider((n, _, _) => Reply(scenario switch
         {
             "stop" => Update(n, ChatFinishReason.Stop),
-            "usage-stop" => Update(n, ChatFinishReason.Stop, new UsageContent(new UsageDetails { InputTokenCount = 7 })),
-            "text" => Update(n, null, new TextContent("answer")),
-            "reasoning" => Update(n, null, new TextReasoningContent("thinking")),
-            "protected-reasoning" => Update(n, null, new TextReasoningContent("") { ProtectedData = "signature" }),
-            _ => Update(n, null, new DataContent(new byte[] { 1, 2, 3 }, "image/png"))
+            _ => Update(n, ChatFinishReason.Stop, new UsageContent(new UsageDetails { InputTokenCount = 7 }))
         }));
         var (runtime, request) = Runtime(provider, Tool(Success));
         var events = await CollectAsync(runtime, request);
         events.OfType<RunCompletedEvent>().Should().ContainSingle().Which.Status.Should().Be(RunCompletionStatus.Succeeded);
+        provider.Requests.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("text")]
+    [InlineData("reasoning")]
+    [InlineData("protected-reasoning")]
+    [InlineData("image")]
+    public async Task Content_without_completion_is_preserved_but_cannot_succeed(string scenario)
+    {
+        AIContent content = scenario switch
+        {
+            "text" => new TextContent("partial answer"),
+            "reasoning" => new TextReasoningContent("still thinking"),
+            "protected-reasoning" => new TextReasoningContent("") { ProtectedData = "signature" },
+            _ => new DataContent(new byte[] { 1, 2, 3 }, "image/png")
+        };
+        var provider = new Provider((n, _, _) => Reply(Update(n, null, content)));
+        var (runtime, request) = Runtime(provider, Tool(Success));
+        var events = await CollectAsync(runtime, request);
+
+        var terminal = events.OfType<RunCompletedEvent>().Should().ContainSingle().Subject;
+        terminal.Status.Should().Be(RunCompletionStatus.Failed);
+        terminal.ErrorMessage.Should().Contain("without a completion reason");
+        terminal.FinalText.Should().Be(scenario == "text" ? "partial answer" : null);
         provider.Requests.Should().Be(1);
     }
 

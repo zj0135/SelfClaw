@@ -176,7 +176,7 @@ internal sealed class DirectTurnCapabilityResolver : IDirectTurnCapabilityResolv
 
         if (policy.AllowsUserQuestion && request.UserQuestionHandler is { } questionHandler)
         {
-            bindings.AddRange(_askUserToolset.CreateTools(questionHandler));
+            bindings.AddRange(_askUserToolset.CreateTools(questionHandler, request.ConversationId, request.TurnId));
         }
 
         return bindings;
