@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { mount } from '@vue/test-utils';
 import TranscriptSkeleton from '../src/components/chat/transcript/TranscriptSkeleton.vue';
-import { setPendingConversation, useChatTranscript } from '../src/composables/useChatTranscript.js';
+import {
+	clearPendingConversation,
+	setPendingConversation,
+	useChatTranscript,
+} from '../src/composables/useChatTranscript.js';
 
 describe('TranscriptSkeleton', () => {
 	it('renders loading status and skeleton message structure', () => {
@@ -35,5 +39,23 @@ describe('useChatTranscript history switching transition', () => {
 		setPendingConversation(null);
 		expect(isLoadingHistory.value).toBe(false);
 		expect(isEmptyConversation.value).toBe(true);
+	});
+
+	// 宿主对「重新选中已选中的会话」直接短路、不推快照，所以 pending 必须由发起方撤销；
+	// 撤销只能命中自己置的那一份，别把更新的一次切换一起清掉。
+	it('only releases the pending selection it owns', () => {
+		const dummyScroll = {
+			captureBeforeUpdate: () => null,
+			settleAfterUpdate: () => {},
+		};
+
+		const { isLoadingHistory } = useChatTranscript(dummyScroll);
+
+		setPendingConversation('conv-1');
+		clearPendingConversation('conv-2');
+		expect(isLoadingHistory.value).toBe(true);
+
+		clearPendingConversation('conv-1');
+		expect(isLoadingHistory.value).toBe(false);
 	});
 });
