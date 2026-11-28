@@ -2,5 +2,6 @@
   <Project Path="SelfClaw.Core/SelfClaw.Core.csproj" />
   <Project Path="SelfClaw.Desktop/SelfClaw.Desktop.csproj" />
   <Project Path="SelfClaw.Infrastructure/SelfClaw.Infrastructure.csproj" />
+  <Project Path="SelfClaw.LlmProvider/SelfClaw.LlmProvider.csproj" />
   <Project Path="SelfClaw.Tests/SelfClaw.Tests.csproj" />
 </Solution>
